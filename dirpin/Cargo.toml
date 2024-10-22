@@ -1,0 +1,16 @@
+[package]
+name = "dirpin"
+authros.workspace = true
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+dirpin-common = { path = "../dirpin-common" }
+dirpin-client = { path = "../dirpin-client" }
+dirpin-server = { path = "../dirpin-server" }
+tokio.workspace = true
+clap.workspace = true
+config.workspace = true
+eyre.workspace = true
+serde.workspace = true
+

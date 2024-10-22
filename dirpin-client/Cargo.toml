@@ -1,0 +1,12 @@
+[package]
+name = "dirpin-client"
+authros.workspace = true
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+dirpin-common = { path = "../dirpin-common" }
+hyper-util = "0.1.9"
+tokio = { workspace = true }
+tonic = { version = "0.12", features = ["transport"] }
+tower = "0.5.1"
