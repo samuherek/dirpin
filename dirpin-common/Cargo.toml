@@ -1,14 +1,7 @@
 [package]
 name = "dirpin-common"
-authros.workspace = true
+authors.workspace = true
 version.workspace = true
 edition.workspace = true
-build = "build.rs"
 
 [dependencies]
-prost = "0.13"
-tokio = { workspace = true }
-tonic = { version = "0.12", features = ["transport"] }
-
-[build-dependencies]
-tonic-build = "0.12"

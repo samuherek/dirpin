@@ -6,10 +6,11 @@ mod server;
 
 #[derive(Subcommand)]
 pub enum DirpinCmd {
+    #[command(flatten)]
+    Client(client::Cmd),
+
     #[command(subcommand)]
     Server(server::Cmd),
-    #[command(subcommand)]
-    Client(client::Cmd),
 }
 
 impl DirpinCmd {

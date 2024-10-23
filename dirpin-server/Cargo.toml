@@ -1,11 +1,8 @@
 [package]
 name = "dirpin-server"
-authros.workspace = true
+authors.workspace = true
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
 dirpin-common = { path = "../dirpin-common" }
-tokio = { workspace = true }
-tokio-stream = "0.1.16"
-tonic = { version = "0.12", features = ["transport"] }

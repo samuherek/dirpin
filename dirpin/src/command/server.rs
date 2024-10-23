@@ -12,7 +12,7 @@ impl Cmd {
     pub async fn run(self) -> Result<()> {
         match self {
             Self::Start => {
-                dirpin_server::start_server().await.expect("Failed to run server")
+                dirpin_server::hellow()
             }
         }
         Ok(())

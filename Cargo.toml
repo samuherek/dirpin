@@ -3,7 +3,7 @@ members = ["dirpin", "dirpin-common", "dirpin-client", "dirpin-server"]
 resolver = "2"
 
 [workspace.package]
-authros = ["Sam Uherek"]
+authors = ["Sam Uherek"]
 version = "0.1.0"
 edition = "2021"
 
@@ -11,6 +11,5 @@ edition = "2021"
 clap = { version = "4.5.20", features = ["derive"] }
 config = { version = "0.14.0", default-features = false, features = ["toml"] }
 serde = { version = "1", features = ["derive"] }
-sqlx = { version = "0.8", features = ["runtime-tokio-rustls",  "time", "uuid"] }
 eyre = "0.6"
 tokio = { version = "1.41", features = ["full"] }

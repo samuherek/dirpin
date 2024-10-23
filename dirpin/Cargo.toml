@@ -13,4 +13,5 @@ clap.workspace = true
 config.workspace = true
 eyre.workspace = true
 serde.workspace = true
+notify-rust = "4.11.3"
 
