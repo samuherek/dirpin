@@ -2,31 +2,31 @@ use clap::Parser;
 use eyre::Result;
 
 mod account;
+mod info;
 mod list;
 mod search;
 
 #[derive(Parser, Debug)]
 #[clap(infer_subcommands = true)]
 pub enum Cmd {
-    Doctor,
     Info,
+    Key,
+    Doctor,
     List(list::Cmd),
     Search(search::Cmd),
     #[command(subcommand)]
     Account(account::Cmd),
     Sync,
-    Key,
 }
 
 impl Cmd {
     #[tokio::main]
     pub async fn run(self) -> Result<()> {
-        let res = dirpin_client::settings::Settings::new();
-        println!("settings: {res:?}");
+        let settings = dirpin_client::settings::Settings::new()?;
 
         match self {
+            Self::Info => info::run(&settings),
             Self::Doctor => todo!("Show the debug info about the program and what the issue is"),
-            Self::Info => todo!("Show the config file paths"),
             Self::List(cmd) => cmd.run(),
             Self::Search(cmd) => cmd.run(),
             Self::Sync => todo!("Sync"),

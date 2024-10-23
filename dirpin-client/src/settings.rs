@@ -9,9 +9,9 @@ const EXAMPLE_CONFIG: &str = include_str!("../config.toml");
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct Settings {
-    db_path: String,
-    key_path: String,
-    session_path: String,
+    pub db_path: String,
+    pub key_path: String,
+    pub session_path: String,
 }
 
 impl Settings {
