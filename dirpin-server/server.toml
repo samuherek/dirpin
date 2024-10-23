@@ -1,0 +1,5 @@
+## host to bind, can also be passed via CLI args
+# host = "127.0.0.1"
+
+## port to bind, can also be passed via CLI args
+# port = 8080
