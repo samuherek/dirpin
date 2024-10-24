@@ -12,6 +12,7 @@ pub struct Settings {
     pub db_path: String,
     pub key_path: String,
     pub session_path: String,
+    pub server_address: String,
 }
 
 impl Settings {
@@ -25,6 +26,7 @@ impl Settings {
             .set_default("db_path", db_path.to_str())?
             .set_default("key_path", key_path.to_str())?
             .set_default("session_path", session_path.to_str())?
+            .set_default("server_address", "http://127.0.0.1:8090")?
             .add_source(
                 Environment::with_prefix("dirpin")
                     .prefix_separator("_")

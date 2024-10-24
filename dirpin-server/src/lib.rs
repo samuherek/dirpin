@@ -1,13 +1,12 @@
-use axum::http;
-use axum::response::{IntoResponse, Json};
-use axum::routing::get;
 use axum::{serve, Router};
-use eyre::{Context, Error, Result};
+use eyre::{Context, Result};
 use settings::Settings;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
 use tokio::signal;
 
+mod handlers;
+mod router;
 pub mod settings;
 
 #[cfg(target_family = "unix")]
@@ -33,20 +32,8 @@ async fn shutdown_signal() {
     eprintln!("Shutting down gracefully...");
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
-struct IndexResponse {
-    status: String,
-}
-
-async fn index() -> Json<IndexResponse> {
-    Json(IndexResponse {
-        status: "Ok".to_string(),
-    })
-}
-
 async fn make_router(settings: &Settings) -> Router {
-    let router = Router::new().route("/", get(index));
-    router
+    router::router()
 }
 
 pub async fn launch(settings: &Settings, address: SocketAddr) -> Result<()> {
@@ -58,5 +45,6 @@ pub async fn launch(settings: &Settings, address: SocketAddr) -> Result<()> {
     serve(listener, r.into_make_service())
         .with_graceful_shutdown(shutdown_signal())
         .await?;
+
     Ok(())
 }

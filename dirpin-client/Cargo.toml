@@ -11,4 +11,5 @@ config = { workspace = true }
 serde = { workspace = true }
 eyre = { workspace = true }
 shellexpand = "3.1.0"
+reqwest = { workspace = true }
 

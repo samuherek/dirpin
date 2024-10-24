@@ -13,6 +13,10 @@
 ## windows: %USERPROFILE%/.local/share/dirpin/session
 # session_path = "~/.session"
 
+
+## The remote server address for syncing and backup
+# server_address = "https://address.com"
+
 ## enable or disable automatic sync
 # auto_sync = true
 

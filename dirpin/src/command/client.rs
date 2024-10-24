@@ -5,6 +5,7 @@ mod account;
 mod info;
 mod list;
 mod search;
+mod status;
 
 #[derive(Parser, Debug)]
 #[clap(infer_subcommands = true)]
@@ -17,6 +18,7 @@ pub enum Cmd {
     #[command(subcommand)]
     Account(account::Cmd),
     Sync,
+    Status,
 }
 
 impl Cmd {
@@ -26,6 +28,7 @@ impl Cmd {
 
         match self {
             Self::Info => info::run(&settings),
+            Self::Status => status::run(&settings).await?,
             Self::Doctor => todo!("Show the debug info about the program and what the issue is"),
             Self::List(cmd) => cmd.run(),
             Self::Search(cmd) => cmd.run(),
