@@ -2,7 +2,9 @@ use clap::Parser;
 use eyre::Result;
 
 mod account;
+mod add;
 mod info;
+mod key;
 mod list;
 mod search;
 mod status;
@@ -13,6 +15,7 @@ pub enum Cmd {
     Info,
     Key,
     Doctor,
+    Add(add::Cmd),
     List(list::Cmd),
     Search(search::Cmd),
     #[command(subcommand)]
@@ -29,12 +32,13 @@ impl Cmd {
         match self {
             Self::Info => info::run(&settings),
             Self::Status => status::run(&settings).await?,
+            Self::Key => key::run(&settings)?,
+            Self::Add(cmd) => cmd.run(&settings).await?,
             Self::Doctor => todo!("Show the debug info about the program and what the issue is"),
             Self::List(cmd) => cmd.run(),
             Self::Search(cmd) => cmd.run(),
             Self::Sync => todo!("Sync"),
             Self::Account(cmd) => cmd.run(),
-            Self::Key => todo!("generate and show the key for this account"),
         };
 
         Ok(())
