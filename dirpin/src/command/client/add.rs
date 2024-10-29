@@ -1,6 +1,5 @@
 use clap::Parser;
 use dirpin_client::settings::Settings;
-use dirpin_client::encryption;
 use eyre::{Context, Result};
 use std::fs;
 use std::io::Write;
@@ -24,15 +23,12 @@ impl Cmd {
             }
         }
 
-        let key = encryption::load_key(settings);
-        let encrypted = format!("{}\n", self.value);
-
         let mut file = fs::OpenOptions::new()
             .append(true)
             .create(true)
             .open(file_db_path)
             .wrap_err("Failed to open file")?;
-        file.write(encrypted.as_bytes())
+        file.write(format!("{}\n", self.value).as_bytes())
             .wrap_err("Failed to write to the file")?;
 
         println!("Pin added {}", self.value);

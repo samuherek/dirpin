@@ -32,7 +32,7 @@ async fn shutdown_signal() {
     eprintln!("Shutting down gracefully...");
 }
 
-async fn make_router(settings: &Settings) -> Router {
+async fn make_router(_settings: &Settings) -> Router {
     router::router()
 }
 
