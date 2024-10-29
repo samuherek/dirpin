@@ -24,3 +24,11 @@ pub async fn health_check(address: &str) -> Result<HealthCheckResponse> {
     let res = res.json::<HealthCheckResponse>().await?;
     Ok(res)
 }
+
+pub async fn handle_sync(address: &str) -> Result<()> {
+    let url = format!("{address}/sync");
+    let res = reqwest::get(url).await?;
+    handle_response_error(res).await?;
+    println!("sync res from server");
+    Ok(())
+}

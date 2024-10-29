@@ -6,6 +6,8 @@ use std::fs::{create_dir_all, File};
 use std::io::Write;
 use std::path::PathBuf;
 use std::str::FromStr;
+use time::format_description::well_known::Rfc3339;
+use time::OffsetDateTime;
 
 const EXAMPLE_CONFIG: &str = include_str!("../config.toml");
 const HOST_ID_FILENAME: &str = "host_id";
@@ -39,10 +41,19 @@ impl Settings {
         Ok(())
     }
 
-    pub fn last_sync() -> Result<()> {
+    pub fn save_last_sync() -> Result<()> {
+        Settings::save_to_data_dir(
+            LAST_SYNC_FILENAME,
+            OffsetDateTime::now_utc().format(&Rfc3339)?.as_str(),
+        )?;
+        Ok(())
+    }
+
+    pub fn last_sync() -> Result<OffsetDateTime> {
         let value = Settings::read_from_data_dir(LAST_SYNC_FILENAME);
         match value {
-            Some(v) => 
+            Some(v) => Ok(OffsetDateTime::parse(&v, &Rfc3339)?),
+            None => Ok(OffsetDateTime::UNIX_EPOCH),
         }
     }
 

@@ -13,7 +13,8 @@ eyre = { workspace = true }
 shellexpand = "3.1.0"
 reqwest = { workspace = true }
 crypto_secretbox = "0.1.1"
+base64 = { workspace = true }
 rmp = "0.8.14"
-base64 = "0.22.1"
 fs-err = "3.0.0"
+time = { workspace = true }
 
