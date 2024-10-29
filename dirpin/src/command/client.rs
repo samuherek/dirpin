@@ -8,6 +8,7 @@ mod key;
 mod list;
 mod search;
 mod status;
+mod sync;
 
 #[derive(Parser, Debug)]
 #[clap(infer_subcommands = true)]
@@ -17,10 +18,10 @@ pub enum Cmd {
     Doctor,
     Add(add::Cmd),
     List(list::Cmd),
+    Sync,
     Search(search::Cmd),
     #[command(subcommand)]
     Account(account::Cmd),
-    Sync,
     Status,
 }
 
@@ -35,9 +36,9 @@ impl Cmd {
             Self::Key => key::run(&settings)?,
             Self::Add(cmd) => cmd.run(&settings).await?,
             Self::List(cmd) => cmd.run(&settings)?,
+            Self::Sync => sync::run(&settings).await?,
             Self::Doctor => todo!("Show the debug info about the program and what the issue is"),
             Self::Search(cmd) => cmd.run(),
-            Self::Sync => todo!("Sync"),
             Self::Account(cmd) => cmd.run(),
         };
 

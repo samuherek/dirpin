@@ -1,11 +1,15 @@
 use config::builder::DefaultState;
 use config::{Config, ConfigBuilder, Environment, File as ConfigFile, FileFormat};
+use dirpin_common::domain::HostId;
 use eyre::{eyre, Context, Result};
 use std::fs::{create_dir_all, File};
 use std::io::Write;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 const EXAMPLE_CONFIG: &str = include_str!("../config.toml");
+const HOST_ID_FILENAME: &str = "host_id";
+const LAST_SYNC_FILENAME: &str = "last_sync_time";
 
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct Settings {
@@ -16,6 +20,45 @@ pub struct Settings {
 }
 
 impl Settings {
+    fn read_from_data_dir(filename: &str) -> Option<String> {
+        let data_dir = dirpin_common::utils::data_dir();
+        let path = data_dir.join(filename);
+
+        if !path.exists() {
+            return None;
+        }
+
+        let value = fs_err::read_to_string(path);
+        value.ok()
+    }
+
+    fn save_to_data_dir(filename: &str, value: &str) -> Result<()> {
+        let data_dir = dirpin_common::utils::data_dir();
+        let path = data_dir.join(filename);
+        fs_err::write(path, value)?;
+        Ok(())
+    }
+
+    pub fn last_sync() -> Result<()> {
+        let value = Settings::read_from_data_dir(LAST_SYNC_FILENAME);
+        match value {
+            Some(v) => 
+        }
+    }
+
+    pub fn host_id() -> HostId {
+        let id = Settings::read_from_data_dir(HOST_ID_FILENAME);
+        if let Some(id) = id {
+            let host_id = HostId::from_str(id.as_str()).expect("Failed to parse local host id");
+            host_id
+        } else {
+            let host_id = HostId::new();
+            Settings::save_to_data_dir(HOST_ID_FILENAME, host_id.to_string().as_ref())
+                .expect("Failed to write local host id");
+            host_id
+        }
+    }
+
     pub fn builder() -> Result<ConfigBuilder<DefaultState>> {
         let data_dir = dirpin_common::utils::data_dir();
         let db_path = data_dir.join("pins.db");
