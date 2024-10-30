@@ -29,12 +29,13 @@ impl Cmd {
     #[tokio::main]
     pub async fn run(self) -> Result<()> {
         let settings = dirpin_client::settings::Settings::new()?;
+        let db = dirpin_client::database::Database::new(&settings.db_path).await?;
 
         match self {
             Self::Info => info::run(&settings),
             Self::Status => status::run(&settings).await?,
             Self::Key => key::run(&settings)?,
-            Self::Add(cmd) => cmd.run(&settings).await?,
+            Self::Add(cmd) => cmd.run(&settings, &db).await?,
             Self::List(cmd) => cmd.run(&settings)?,
             Self::Sync => sync::run(&settings).await?,
             Self::Doctor => todo!("Show the debug info about the program and what the issue is"),

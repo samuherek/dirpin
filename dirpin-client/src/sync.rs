@@ -3,6 +3,7 @@ use crate::settings::Settings;
 use eyre::Result;
 
 pub async fn sync(settings: &Settings) -> Result<()> {
-    api_client::handle_sync(&settings.server_address).await?;
+    let res = api_client::handle_sync(&settings.server_address).await?;
+    println!("{res:?}");
     Ok(())
 }

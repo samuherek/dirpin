@@ -42,6 +42,7 @@ pub async fn launch(settings: &Settings, address: SocketAddr) -> Result<()> {
         .context("Failed to connect to tcp listener")?;
     let r = make_router(&settings).await;
 
+    tracing::info!("Server started at {}", address);
     serve(listener, r.into_make_service())
         .with_graceful_shutdown(shutdown_signal())
         .await?;

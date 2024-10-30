@@ -1,6 +1,7 @@
-use dirpin_common::api::HealthCheckResponse;
+use dirpin_common::api::{HealthCheckResponse, SyncRequest, SyncResponse};
 use eyre::{bail, Result};
 use reqwest::{Response, StatusCode};
+use time::OffsetDateTime;
 
 async fn handle_response_error(res: Response) -> Result<Response> {
     let status = res.status();
@@ -25,10 +26,16 @@ pub async fn health_check(address: &str) -> Result<HealthCheckResponse> {
     Ok(res)
 }
 
-pub async fn handle_sync(address: &str) -> Result<()> {
+pub async fn handle_sync(address: &str) -> Result<SyncResponse> {
     let url = format!("{address}/sync");
-    let res = reqwest::get(url).await?;
-    handle_response_error(res).await?;
-    println!("sync res from server");
-    Ok(())
+    let res = reqwest::Client::new()
+        .post(&url)
+        .json(&SyncRequest {
+            from: OffsetDateTime::now_utc(),
+        })
+        .send()
+        .await?;
+    let res = handle_response_error(res).await?;
+    let res = res.json::<SyncResponse>().await?;
+    Ok(res)
 }

@@ -2,6 +2,7 @@ use clap::Parser;
 use dirpin_server::settings::Settings;
 use eyre::Result;
 use std::net::SocketAddr;
+use tracing_subscriber::{self, fmt, prelude::*, EnvFilter};
 
 #[derive(Parser, Debug)]
 #[clap(infer_subcommands = true)]
@@ -20,6 +21,13 @@ pub enum Cmd {
 impl Cmd {
     #[tokio::main]
     pub async fn run(self) -> Result<()> {
+        tracing_subscriber::registry()
+            .with(fmt::layer())
+            .with(EnvFilter::from_default_env())
+            .init();
+
+        tracing::trace!(command = ?self, "server command");
+
         match self {
             Self::Start { host, port } => {
                 let settings = Settings::new()?;

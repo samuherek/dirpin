@@ -17,4 +17,7 @@ base64 = { workspace = true }
 rmp = "0.8.14"
 fs-err = "3.0.0"
 time = { workspace = true }
-
+sqlx = { version = "0.8.2", features = ["sqlite", "time", "uuid", "runtime-tokio-rustls", "migrate"] }
+uuid = { workspace = true }
+tracing = { workspace = true }
+whoami = "1.5.2"
