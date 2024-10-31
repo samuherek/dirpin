@@ -1,7 +1,7 @@
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct Pin {
     pub id: Uuid,
     pub data: String,
@@ -11,6 +11,7 @@ pub struct Pin {
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
     pub deleted_at: Option<OffsetDateTime>,
+    pub version: u32,
 }
 
 impl Pin {
@@ -27,6 +28,7 @@ impl Pin {
             created_at,
             updated_at,
             deleted_at: None,
+            version: 1,
         }
     }
 }

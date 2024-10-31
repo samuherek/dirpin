@@ -10,16 +10,19 @@ const EXAMPLE_CONFIG: &str = include_str!("../server.toml");
 pub struct Settings {
     pub host: String,
     pub port: u16,
+    pub db_path: String,
 }
 
 impl Settings {
     pub fn new() -> Result<Self, Error> {
         let config_dir = std::env::var("DIRPIN_CONFIG_DIR")
             .map_or(dirpin_common::utils::config_dir(), PathBuf::from);
+        let db_path = config_dir.join("server.db");
 
         let mut config_builder = Config::builder()
             .set_default("host", "127.0.0.1")?
             .set_default("port", 8090)?
+            .set_default("db_path", db_path.to_str())?
             .add_source(
                 Environment::with_prefix("dirpin")
                     .prefix_separator("_")

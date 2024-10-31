@@ -18,7 +18,7 @@ pub enum Cmd {
     Doctor,
     Add(add::Cmd),
     List(list::Cmd),
-    Sync,
+    Sync(sync::Cmd),
     Search(search::Cmd),
     #[command(subcommand)]
     Account(account::Cmd),
@@ -37,7 +37,7 @@ impl Cmd {
             Self::Key => key::run(&settings)?,
             Self::Add(cmd) => cmd.run(&settings, &db).await?,
             Self::List(cmd) => cmd.run(&settings)?,
-            Self::Sync => sync::run(&settings).await?,
+            Self::Sync(cmd) => cmd.run(&settings, &db).await?,
             Self::Doctor => todo!("Show the debug info about the program and what the issue is"),
             Self::Search(cmd) => cmd.run(),
             Self::Account(cmd) => cmd.run(),

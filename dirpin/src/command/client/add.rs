@@ -1,5 +1,5 @@
 use clap::Parser;
-use dirpin_client::database::{Database, current_context};
+use dirpin_client::database::{current_context, Database};
 use dirpin_client::domain::Pin;
 use dirpin_client::settings::Settings;
 use eyre::{Context, Result};
