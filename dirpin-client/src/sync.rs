@@ -1,7 +1,7 @@
 use crate::api_client;
 use crate::database::Database;
 use crate::domain::Pin;
-use crate::encryption::{decrypt, encrypt, load_key, EncryptedPin};
+use crate::encryption::{decrypt, encrypt, load_key};
 use crate::settings::Settings;
 use crypto_secretbox::Key;
 use dirpin_common::api::AddPinRequest;
@@ -56,6 +56,7 @@ async fn sync_download(
     }
 
     db.save_bulk(&update_buf).await?;
+
     if !conflict_buf.is_empty() {
         println!("conflicts: {conflict_buf:?}");
     }

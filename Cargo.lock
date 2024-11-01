@@ -104,6 +104,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyhow"
+version = "1.0.92"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74f37166d7d48a0284b99dd824694c26119c700b53bf0d1540cdb147dbdaaf13"
+
+[[package]]
 name = "async-broadcast"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -657,6 +663,7 @@ dependencies = [
  "serde",
  "serde_json",
  "shellexpand",
+ "sql-builder",
  "sqlx",
  "time",
  "tokio",
@@ -2348,6 +2355,16 @@ checksum = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d"
 dependencies = [
  "base64ct",
  "der",
+]
+
+[[package]]
+name = "sql-builder"
+version = "3.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1008d95d2ec2d062959352527be30e10fec42a1aa5e5a48d990a5ff0fb9bdc0"
+dependencies = [
+ "anyhow",
+ "thiserror",
 ]
 
 [[package]]

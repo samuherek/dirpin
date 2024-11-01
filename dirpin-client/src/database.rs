@@ -3,6 +3,7 @@ use crate::settings::Settings;
 use crate::utils::get_host_user;
 use dirpin_common::utils;
 use eyre::Result;
+use sql_builder::{quote, SqlBuilder};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow};
 use sqlx::{Row, SqlitePool};
 use std::path::Path;
@@ -10,6 +11,13 @@ use std::str::FromStr;
 use time::OffsetDateTime;
 use tracing::debug;
 use uuid::Uuid;
+
+#[derive(Debug)]
+pub enum FilterMode {
+    Gloabl,
+    Directory,
+    Workspace,
+}
 
 #[derive(Debug)]
 pub struct Context {
@@ -146,6 +154,26 @@ impl Database {
         debug!("Query pins before from datbase");
         let res = sqlx::query("select * from pins where updated_at > ?1")
             .bind(timestamp.unix_timestamp_nanos() as i64)
+            .map(Self::map_query_pins)
+            .fetch_all(&self.pool)
+            .await?;
+
+        Ok(res)
+    }
+
+    pub async fn list(&self, filters: &[FilterMode], context: &Context) -> Result<Vec<Pin>> {
+        let mut query = SqlBuilder::select_from("pins");
+        query.field("*").order_desc("updated_at");
+        for filter in filters {
+            match filter {
+                FilterMode::Gloabl => &mut query,
+                FilterMode::Directory => query.and_where_eq("cwd", quote(&context.cwd)),
+                FilterMode::Workspace => query.and_where_eq("cwd", quote(&context.cwd)),
+            };
+        }
+
+        let query = query.sql().expect("Failed to parse query");
+        let res = sqlx::query(&query)
             .map(Self::map_query_pins)
             .fetch_all(&self.pool)
             .await?;
