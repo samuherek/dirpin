@@ -1,18 +1,28 @@
 use crate::api_client;
 use crate::database::Database;
+use crate::encryption::{decrypt, encrypt, load_key, EncryptedPin};
 use crate::settings::Settings;
+use crypto_secretbox::Key;
 use dirpin_common::api::AddPinRequest;
 use eyre::Result;
 use time::OffsetDateTime;
 
-async fn sync_download(settings: &Settings, _db: &Database, from: OffsetDateTime) -> Result<()> {
-    let res = api_client::handle_sync(&settings.server_address, from).await?;
+async fn sync_download(
+    settings: &Settings,
+    _db: &Database,
+    key: &Key,
+    _from: OffsetDateTime,
+) -> Result<()> {
+    let from = OffsetDateTime::UNIX_EPOCH;
+    let res = api_client::sync(&settings.server_address, from).await?;
 
-    println!("sync down res: {res:?}");
     if res.updated.is_empty() && res.deleted.is_empty() {
         println!("All up to date");
     } else {
-        todo!("Have to implement the download sync");
+        for x in res.updated.into_iter() {
+            let data: EncryptedPin = serde_json::from_str(&x)?;
+            let _ = decrypt(data, key);
+        }
     }
 
     Ok(())
@@ -21,6 +31,7 @@ async fn sync_download(settings: &Settings, _db: &Database, from: OffsetDateTime
 async fn sync_upload(
     settings: &Settings,
     db: &Database,
+    key: &Key,
     force: bool,
     from: OffsetDateTime,
 ) -> Result<()> {
@@ -29,12 +40,14 @@ async fn sync_upload(
     } else {
         from
     };
-    let items = db.after(from, 10).await?;
+    // TODO: Split this into pages so that we don't have massive payload.
+    let items = db.after(from, 1000).await?;
     let mut buffer = vec![];
 
     for el in &items {
         // TODO: Encryt it
-        let data = serde_json::to_string(el)?;
+        let data = encrypt(el, key)?;
+        let data = serde_json::to_string(&data)?;
 
         let p = AddPinRequest {
             id: el.id.to_string(),
@@ -45,9 +58,8 @@ async fn sync_upload(
         buffer.push(p);
     }
 
-    api_client::handle_post_pins(&settings.server_address, &buffer).await?;
+    api_client::post_pins(&settings.server_address, &buffer).await?;
 
-    println!("items: {items:?}");
     Ok(())
 }
 
@@ -57,8 +69,9 @@ pub async fn sync(settings: &Settings, db: &Database, force: bool) -> Result<()>
     // 3. Upload remaining local changes, ensuring full consistency.
     // 4. Update last_sync_timestamp on successful sync.
     let from = Settings::last_sync()?;
-    sync_download(settings, db, from.clone()).await?;
-    sync_upload(settings, db, force, from).await?;
+    let key = load_key(settings)?;
+    sync_download(settings, db, &key, from.clone()).await?;
+    sync_upload(settings, db, &key, force, from).await?;
 
     println!("Done sync");
     Settings::save_last_sync()?;

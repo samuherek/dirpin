@@ -1,7 +1,7 @@
-use crate::models::NewPin;
+use crate::models::{DbPin, NewPin};
 use eyre::Result;
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-use sqlx::SqlitePool;
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow};
+use sqlx::{Row, SqlitePool};
 use std::path::Path;
 use std::str::FromStr;
 use time::OffsetDateTime;
@@ -36,6 +36,30 @@ impl Database {
         sqlx::migrate!("./migrations").run(pool).await?;
 
         Ok(())
+    }
+
+    // TODO: Redo from NewPin to actual DbPin
+    fn map_quert_pins(row: SqliteRow) -> DbPin {
+        DbPin {
+            id: row.get("id"),
+            client_id: row.get("client_id"),
+            user_id: row.get("user_id"),
+            timestamp: OffsetDateTime::from_unix_timestamp_nanos(
+                row.get::<i64, _>("timestamp") as i128
+            )
+            .unwrap(),
+            version: row.get("version"),
+            data: row.get("data"),
+        }
+    }
+
+    pub async fn list_pins(&self) -> Result<Vec<DbPin>> {
+        let res = sqlx::query("select * from pins")
+            .map(Self::map_quert_pins)
+            .fetch_all(&self.pool)
+            .await?;
+
+        Ok(res)
     }
 
     pub async fn add_pins(&self, pins: &[NewPin]) -> Result<()> {

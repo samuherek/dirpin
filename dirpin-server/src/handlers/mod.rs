@@ -16,16 +16,27 @@ pub async fn index() -> Json<HealthCheckResponse> {
     })
 }
 
-pub async fn sync(params: Query<SyncRequest>) -> Json<SyncResponse> {
-    println!("sync:: {:?}", params);
-    Json(SyncResponse {
-        updated: vec![],
-        deleted: vec![],
-    })
+// TODO: make a propert error response types
+pub async fn sync(state: State<AppState>, _params: Query<SyncRequest>) -> Json<SyncResponse> {
+    match state.database.list_pins().await {
+        Ok(v) => {
+            let values = v.into_iter().map(|x| x.data).collect::<Vec<_>>();
+            Json(SyncResponse {
+                updated: values,
+                deleted: vec![],
+            })
+        }
+        Err(e) => {
+            println!("Error: {e}");
+            Json(SyncResponse {
+                updated: vec![],
+                deleted: vec![],
+            })
+        }
+    }
 }
 
 pub async fn add(state: State<AppState>, Json(req): Json<Vec<AddPinRequest>>) -> impl IntoResponse {
-    println!("adding:....");
     let pins = req
         .into_iter()
         .map(|x| NewPin {

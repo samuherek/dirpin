@@ -1,4 +1,4 @@
-use dirpin_common::api::{AddPinRequest, HealthCheckResponse, SyncRequest, SyncResponse};
+use dirpin_common::api::{AddPinRequest, HealthCheckResponse, SyncResponse};
 use eyre::{bail, Result};
 use reqwest::{Response, StatusCode};
 use time::format_description::well_known::Rfc3339;
@@ -27,7 +27,7 @@ pub async fn health_check(address: &str) -> Result<HealthCheckResponse> {
     Ok(res)
 }
 
-pub async fn handle_sync(address: &str, from: OffsetDateTime) -> Result<SyncResponse> {
+pub async fn sync(address: &str, from: OffsetDateTime) -> Result<SyncResponse> {
     let url = format!(
         "{address}/sync?last_sync_ts={}",
         urlencoding::encode(from.format(&Rfc3339)?.as_str())
@@ -39,7 +39,7 @@ pub async fn handle_sync(address: &str, from: OffsetDateTime) -> Result<SyncResp
     Ok(res)
 }
 
-pub async fn handle_post_pins(address: &str, data: &[AddPinRequest]) -> Result<()> {
+pub async fn post_pins(address: &str, data: &[AddPinRequest]) -> Result<()> {
     let url = format!("{address}/pins");
     let res = reqwest::Client::new().post(url).json(data).send().await?;
     handle_response_error(res).await?;
