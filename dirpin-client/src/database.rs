@@ -90,11 +90,21 @@ impl Database {
         // TODO: Think about using the query! for static checks
         sqlx::query(
             r#"
-            insert or ignore into pins(
+            insert into pins(
                 id, data, hostname, cwd, cgd, created_at, updated_at, deleted_at, version
             ) values(
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
-            ) "#,
+            )
+            on conflict(id) do update set
+                data = ?2,
+                hostname = ?3,
+                cwd = ?4,
+                cgd = ?5,
+                created_at = ?6,
+                updated_at = ?7,
+                deleted_at = ?8,
+                version = ?9
+            "#,
         )
         .bind(v.id.to_string())
         .bind(v.data.as_str())
@@ -117,6 +127,18 @@ impl Database {
         // TODO: if transaction fails, it does not throw error?
         Self::save_raw(&mut tx, item).await?;
         tx.commit().await?;
+
+        Ok(())
+    }
+
+    pub async fn save_bulk(&self, items: &[Pin]) -> Result<()> {
+        debug!("Saving pins in bulk to database");
+        let mut tx = self.pool.begin().await?;
+        for el in items {
+            Self::save_raw(&mut tx, &el).await?;
+        }
+        tx.commit().await?;
+
         Ok(())
     }
 

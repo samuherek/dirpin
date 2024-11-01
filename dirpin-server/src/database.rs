@@ -69,8 +69,19 @@ impl Database {
             let created_at = OffsetDateTime::now_utc().to_string();
             sqlx::query(
                 r#"
-                insert into pins(client_id, user_id, timestamp, version, data, created_at) 
-                values(?1, ?2, ?3, ?4, ?5, ?6)
+                insert into pins(
+                    client_id, user_id, timestamp, version, data, created_at
+                ) 
+                values(
+                    ?1, ?2, ?3, ?4, ?5, ?6
+                )
+                on conflict(client_id) do update set
+                    client_id = ?1,
+                    user_id = ?2,
+                    timestamp = ?3, 
+                    version = ?4, 
+                    data = ?5,
+                    created_at = ?6
             "#,
             )
             .bind(el.client_id.as_str())

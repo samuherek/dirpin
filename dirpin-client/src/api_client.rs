@@ -11,6 +11,7 @@ async fn handle_response_error(res: Response) -> Result<Response> {
     }
 
     if !status.is_success() {
+        println!("{res:?}");
         // TODO: account for all the cases
         bail!("There was an error with the service: Status {status:?}.");
     }

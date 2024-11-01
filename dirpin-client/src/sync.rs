@@ -9,7 +9,7 @@ use time::OffsetDateTime;
 
 async fn sync_download(
     settings: &Settings,
-    _db: &Database,
+    db: &Database,
     key: &Key,
     _from: OffsetDateTime,
 ) -> Result<()> {
@@ -19,10 +19,13 @@ async fn sync_download(
     if res.updated.is_empty() && res.deleted.is_empty() {
         println!("All up to date");
     } else {
-        for x in res.updated.into_iter() {
-            let data: EncryptedPin = serde_json::from_str(&x)?;
-            let _ = decrypt(data, key);
-        }
+        let data: Vec<_> = res
+            .updated
+            .iter()
+            .map(|x| serde_json::from_str(x).expect("failed deserialize"))
+            .map(|x| decrypt(x, key).expect("failed to decrypt pin. check key!"))
+            .collect();
+        db.save_bulk(&data).await?;
     }
 
     Ok(())

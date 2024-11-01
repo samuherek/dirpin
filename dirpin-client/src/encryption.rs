@@ -120,8 +120,8 @@ pub fn decode_from_msgpack(bytes: &[u8]) -> Result<Pin> {
     use rmp::Marker;
 
     let mut bytes = Bytes::new(bytes);
-
     let len = decode::read_array_len(&mut bytes).map_err(rmp_error_report)?;
+
     if len != 9 {
         bail!("incorrectly formed decrypted pin object");
     }
@@ -134,9 +134,9 @@ pub fn decode_from_msgpack(bytes: &[u8]) -> Result<Pin> {
     let (cgd, bytes) = match decode::read_str_from_slice(bytes) {
         Ok((value, bytes)) => (Some(value), bytes),
         Err(DecodeStringError::TypeMismatch(Marker::Null)) => {
-            let mut rest = Bytes::new(bytes);
+            let mut rest = bytes;
             decode::read_nil(&mut rest).map_err(rmp_error_report)?;
-            (None, bytes)
+            (None, rest)
         }
         Err(e) => return Err(rmp_error_report(e)),
     };
@@ -148,9 +148,9 @@ pub fn decode_from_msgpack(bytes: &[u8]) -> Result<Pin> {
     let (deleted_at, bytes) = match decode::read_str_from_slice(bytes) {
         Ok((value, bytes)) => (Some(value), bytes),
         Err(DecodeStringError::TypeMismatch(Marker::Null)) => {
-            let mut rest = Bytes::new(bytes);
+            let mut rest = bytes;
             decode::read_nil(&mut rest).map_err(rmp_error_report)?;
-            (None, bytes)
+            (None, rest)
         }
         Err(e) => return Err(rmp_error_report(e)),
     };
