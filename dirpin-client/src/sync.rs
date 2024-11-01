@@ -1,31 +1,63 @@
 use crate::api_client;
 use crate::database::Database;
+use crate::domain::Pin;
 use crate::encryption::{decrypt, encrypt, load_key, EncryptedPin};
 use crate::settings::Settings;
 use crypto_secretbox::Key;
 use dirpin_common::api::AddPinRequest;
 use eyre::Result;
+use std::collections::HashMap;
 use time::OffsetDateTime;
+use uuid::Uuid;
 
 async fn sync_download(
     settings: &Settings,
     db: &Database,
     key: &Key,
-    _from: OffsetDateTime,
+    from: OffsetDateTime,
 ) -> Result<()> {
-    let from = OffsetDateTime::UNIX_EPOCH;
     let res = api_client::sync(&settings.server_address, from).await?;
 
-    if res.updated.is_empty() && res.deleted.is_empty() {
-        println!("All up to date");
-    } else {
-        let data: Vec<_> = res
-            .updated
-            .iter()
-            .map(|x| serde_json::from_str(x).expect("failed deserialize"))
-            .map(|x| decrypt(x, key).expect("failed to decrypt pin. check key!"))
-            .collect();
-        db.save_bulk(&data).await?;
+    let local: HashMap<Uuid, Pin> = db
+        .after(from)
+        .await?
+        .into_iter()
+        .map(|x| (x.id.clone(), x))
+        .collect();
+    let remote: HashMap<Uuid, Pin> = res
+        .updated
+        .iter()
+        .map(|x| serde_json::from_str(x).expect("failed deserialize"))
+        .map(|x| decrypt(x, key).expect("failed to decrypt pin. check key!"))
+        .map(|x| (x.id.clone(), x))
+        .collect();
+
+    let mut conflict_buf: Vec<Pin> = vec![];
+    let mut update_buf: Vec<Pin> = vec![];
+
+    for (id, r) in remote {
+        if let Some(l) = local.get(&id) {
+            // If updated_at and version is higher, it's all good
+            // if updated_at and version is equal, it's old and good,
+            // if locals are higher, local will update later
+            // otherwise we have a conflict;
+            if r.updated_at > l.updated_at && r.version > l.version {
+                update_buf.push(r);
+            } else if r.updated_at == l.updated_at && r.version == l.version {
+                continue;
+            } else if r.updated_at < l.updated_at && r.version < l.version {
+                continue;
+            } else {
+                conflict_buf.push(r);
+            }
+        } else {
+            update_buf.push(r);
+        }
+    }
+
+    db.save_bulk(&update_buf).await?;
+    if !conflict_buf.is_empty() {
+        println!("conflicts: {conflict_buf:?}");
     }
 
     Ok(())
@@ -35,16 +67,10 @@ async fn sync_upload(
     settings: &Settings,
     db: &Database,
     key: &Key,
-    force: bool,
     from: OffsetDateTime,
 ) -> Result<()> {
-    let from = if force {
-        OffsetDateTime::UNIX_EPOCH
-    } else {
-        from
-    };
     // TODO: Split this into pages so that we don't have massive payload.
-    let items = db.after(from, 1000).await?;
+    let items = db.after(from).await?;
     let mut buffer = vec![];
 
     for el in &items {
@@ -73,8 +99,13 @@ pub async fn sync(settings: &Settings, db: &Database, force: bool) -> Result<()>
     // 4. Update last_sync_timestamp on successful sync.
     let from = Settings::last_sync()?;
     let key = load_key(settings)?;
+    let from = if force {
+        OffsetDateTime::UNIX_EPOCH
+    } else {
+        from
+    };
     sync_download(settings, db, &key, from.clone()).await?;
-    sync_upload(settings, db, &key, force, from).await?;
+    sync_upload(settings, db, &key, from).await?;
 
     println!("Done sync");
     Settings::save_last_sync()?;

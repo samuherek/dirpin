@@ -142,11 +142,10 @@ impl Database {
         Ok(())
     }
 
-    pub async fn after(&self, timestamp: OffsetDateTime, page_limit: i64) -> Result<Vec<Pin>> {
+    pub async fn after(&self, timestamp: OffsetDateTime) -> Result<Vec<Pin>> {
         debug!("Query pins before from datbase");
-        let res = sqlx::query("select * from pins where updated_at > ?1 limit ?2")
+        let res = sqlx::query("select * from pins where updated_at > ?1")
             .bind(timestamp.unix_timestamp_nanos() as i64)
-            .bind(page_limit)
             .map(Self::map_query_pins)
             .fetch_all(&self.pool)
             .await?;
