@@ -16,7 +16,8 @@ impl Cmd {
         let pins = db.list(&[FilterMode::Workspace], &context).await?;
 
         for el in pins {
-            println!("{}:: {}", el.hostname, el.data);
+            let (_, user) = el.hostname.split_once(":").unwrap();
+            println!("{}:: {}", user, el.data);
         }
 
         Ok(())

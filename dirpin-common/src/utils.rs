@@ -1,3 +1,4 @@
+use std::io::{self, IsTerminal, Read, Write};
 use std::path::PathBuf;
 
 #[cfg(not(target_os = "windows"))]
@@ -41,7 +42,7 @@ pub fn has_git_dir(path: &str) -> bool {
     gitdir.exists()
 }
 
-/// Get the path to the parent directory that contains a ".git" 
+/// Get the path to the parent directory that contains a ".git"
 pub fn get_git_parent_dir(path: &str) -> Option<String> {
     let mut path = PathBuf::from(path);
     while path.parent().is_some() && !has_git_dir(path.to_str().unwrap()) {
@@ -53,4 +54,16 @@ pub fn get_git_parent_dir(path: &str) -> Option<String> {
     }
 
     None
+}
+
+pub fn read_pipe_value() -> Result<Option<String>, io::Error> {
+    let mut stdin = io::stdin();
+    if stdin.is_terminal() {
+        Ok(None)
+    } else {
+        let mut buf = String::new();
+        stdin.read_to_string(&mut buf)?;
+        let value = if buf.is_empty() { None } else { Some(buf) };
+        Ok(value)
+    }
 }
