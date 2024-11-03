@@ -19,25 +19,18 @@ pub enum FilterMode {
     Workspace,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Context {
     pub cwd: String,
     pub hostname: String,
     pub cgd: Option<String>,
-    pub host_id: String,
 }
 
 pub fn current_context() -> Context {
     let hostname = get_host_user();
     let cwd = utils::get_current_dir();
     let cgd = utils::get_git_parent_dir(&cwd);
-    let host_id = Settings::host_id().to_string();
-    Context {
-        cwd,
-        hostname,
-        cgd,
-        host_id,
-    }
+    Context { cwd, hostname, cgd }
 }
 
 pub struct Database {
@@ -161,7 +154,12 @@ impl Database {
         Ok(res)
     }
 
-    pub async fn list(&self, filters: &[FilterMode], context: &Context) -> Result<Vec<Pin>> {
+    pub async fn list(
+        &self,
+        filters: &[FilterMode],
+        context: &Context,
+        search: &str,
+    ) -> Result<Vec<Pin>> {
         let mut query = SqlBuilder::select_from("pins");
         query.field("*").order_desc("updated_at");
         for filter in filters {
@@ -170,6 +168,9 @@ impl Database {
                 FilterMode::Directory => query.and_where_eq("cwd", quote(&context.cwd)),
                 FilterMode::Workspace => query.and_where_eq("cwd", quote(&context.cwd)),
             };
+        }
+        if !search.is_empty() {
+            query.and_where_like_any("data", search);
         }
 
         let query = query.sql().expect("Failed to parse query");

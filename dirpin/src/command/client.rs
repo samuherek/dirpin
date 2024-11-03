@@ -38,7 +38,7 @@ impl Cmd {
             Self::Add(cmd) => cmd.run(&settings, &db).await?,
             Self::List(cmd) => cmd.run(&settings, &db).await?,
             Self::Sync(cmd) => cmd.run(&settings, &db).await?,
-            Self::Search(cmd) => cmd.run().await?,
+            Self::Search(cmd) => cmd.run(&settings, &db).await?,
             Self::Doctor => todo!("Show the debug info about the program and what the issue is"),
             Self::Account(cmd) => cmd.run(),
         };
