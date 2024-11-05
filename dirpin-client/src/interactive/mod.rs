@@ -98,7 +98,7 @@ enum KeymapMode {
     Insert,
 }
 
-enum LineMode {
+enum PromptMode {
     Info,
     Search,
 }
@@ -144,13 +144,13 @@ impl From<String> for InputCursor {
     }
 }
 
-struct LineState {
+struct PromptState {
     input: InputCursor,
     show_cursor: bool,
-    mode: LineMode,
+    mode: PromptMode,
 }
 
-impl LineState {
+impl PromptState {
     fn source(&self) -> &str {
         self.input.as_str()
     }
@@ -160,7 +160,7 @@ struct AppState<'a> {
     page: PageState,
     results_state: ListState,
     keymap_mode: KeymapMode,
-    line: LineState,
+    prompt: PromptState,
     results: Vec<Pin>,
     context: Context,
     running: RunningState,
@@ -171,12 +171,12 @@ impl AppState<'_> {
     async fn query_list(&mut self, ctx: &Context) -> Result<()> {
         self.results = self
             .database
-            .list(&[FilterMode::Workspace], ctx, self.line.source())
+            .list(&[FilterMode::Workspace], ctx, self.prompt.source())
             .await?;
         Ok(())
     }
 
-    async fn query_save(&mut self, item: &Pin) -> Result<()> {
+    async fn query_save(&self, item: &Pin) -> Result<()> {
         self.database.save(item).await?;
 
         Ok(())
@@ -201,37 +201,35 @@ impl AppState<'_> {
         self.results.get_mut(self.results_state.selected())
     }
 
-    fn handle_search_down(&mut self) {
+    fn handle_search_down(&mut self) -> Option<Event> {
         let i = self.results_state.selected() + 1;
         self.results_state
             .select(i.min(self.results.len().saturating_sub(1)));
+
+        None
     }
 
-    fn handle_search_up(&mut self) {
+    fn handle_search_up(&mut self) -> Option<Event> {
         let i = self.results_state.selected().saturating_sub(1);
         self.results_state.select(i);
+
+        None
     }
 
-    fn handle_keymap_mode(&mut self, mode: KeymapMode) {
+    fn handle_keymap_mode(&mut self, mode: KeymapMode) -> Option<Event> {
         match mode {
             KeymapMode::Normal => {
-                self.line.input.clear();
-                self.line.show_cursor = false;
+                self.prompt.input.clear();
+                self.prompt.show_cursor = false;
             }
-            KeymapMode::Insert => self.line.show_cursor = true,
+            KeymapMode::Insert => self.prompt.show_cursor = true,
         }
         self.keymap_mode = mode;
+
+        None
     }
 
-    fn handle_line_input(&mut self, ev: &KeyEvent) {
-        match ev.code {
-            KeyCode::Char(c) => self.line.input.insert(c),
-            KeyCode::Backspace => self.line.input.remove(),
-            _ => {}
-        }
-    }
-
-    fn handle_edit(&mut self, terminal: &mut tui::Tui) {
+    async fn handle_edit(&mut self) -> Option<Event> {
         let temp_path = Path::new("/tmp/temp_edit.txt");
         let mut temp_file = File::create(temp_path).expect("");
         let selected = self.selected().unwrap();
@@ -250,60 +248,78 @@ impl AppState<'_> {
         fs::remove_file(temp_path).expect("Failed to delete file");
 
         if let Some(text) = next_data {
-            let item = {
-                let item = self.selected_mut().expect("Failed to get selected item");
-                item.data = text.to_string();
-                item.clone()
-            };
-            // self.query_save(&item).await;
+            if text != selected.data {
+                let item = {
+                    let item = self.selected_mut().expect("Failed to get selected item");
+                    item.data = text.to_string();
+                    item.clone()
+                };
+                self.query_save(&item)
+                    .await
+                    .expect("Failed to save to database");
+            }
         }
 
         execute!(stdout(), EnterAlternateScreen).expect("Failed to enter alternate screen");
         enable_raw_mode().expect("Failed to enable raw mode");
-        terminal.clear().expect("Failed to clear terminal")
+        Some(Event::TerminalRepaint)
     }
 
     // TODO: implement a sequence of keys
-    fn handle_key_events(&mut self, ev: &KeyEvent, terminal: &mut tui::Tui) {
-        let ctrl = ev.modifiers.contains(KeyModifiers::CONTROL);
-
-        // Global events
-        match ev.code {
-            KeyCode::Char('c') if ctrl => self.quit(),
-            _ => {}
-        }
-
-        // TODO: Ignore tmux ctrl+a
-
-        match self.keymap_mode {
-            KeymapMode::Normal => match ev.code {
-                KeyCode::Char('j') => self.handle_search_down(),
-                KeyCode::Char('k') => self.handle_search_up(),
-                KeyCode::Char('e') => self.handle_edit(terminal),
-                // KeyCode::Char('i') => self.
-                KeyCode::Char('/') => self.handle_keymap_mode(KeymapMode::Insert),
-                _ => {}
-            },
-            KeymapMode::Insert => match ev.code {
-                KeyCode::Esc => self.handle_keymap_mode(KeymapMode::Normal),
-                _ => self.handle_line_input(ev),
-            },
-        }
-    }
-
-    fn handle_terminal_event(&self, ev: CrosstermEvent) -> Option<Event> {
+    fn handle_terminal_event(&mut self, ev: CrosstermEvent) -> Option<Event> {
         match ev {
             CrosstermEvent::FocusGained => None,
             CrosstermEvent::FocusLost => None,
-            CrosstermEvent::Key(_) => None,
+            CrosstermEvent::Key(key_event) => return Some(Event::KeyInput(key_event)),
             CrosstermEvent::Mouse(_) => None,
             CrosstermEvent::Paste(_) => None,
             CrosstermEvent::Resize(_, _) => None,
         }
     }
 
+    async fn handle_key_input(&mut self, key_event: KeyEvent) -> Option<Event> {
+        let mut event = None;
+        let ctrl = key_event.modifiers.contains(KeyModifiers::CONTROL);
+
+        match key_event.code {
+            KeyCode::Char('c') if ctrl => {
+                self.quit();
+                return event;
+            }
+            _ => {}
+        }
+
+        event = match self.keymap_mode {
+            KeymapMode::Normal => match key_event.code {
+                KeyCode::Char('j') => self.handle_search_down(),
+                KeyCode::Char('k') => self.handle_search_up(),
+                KeyCode::Char('e') => self.handle_edit().await,
+                KeyCode::Char('/') => self.handle_keymap_mode(KeymapMode::Insert),
+                _ => None,
+            },
+            KeymapMode::Insert => match key_event.code {
+                KeyCode::Esc => self.handle_keymap_mode(KeymapMode::Normal),
+                KeyCode::Char(c) => {
+                    self.prompt.input.insert(c);
+                    None
+                }
+                KeyCode::Backspace => {
+                    self.prompt.input.remove();
+                    None
+                }
+                _ => None,
+            },
+        };
+
+        event
+    }
+
     async fn handle_event(&mut self, event: Event) -> Option<Event> {
-        None
+        // TODO:: move to the even thandlers
+        match event {
+            Event::KeyInput(key_input) => self.handle_key_input(key_input).await,
+            _ => None,
+        }
     }
 
     fn build_title(&self) -> Paragraph {
@@ -364,7 +380,7 @@ impl AppState<'_> {
     fn build_input(&self) -> Paragraph {
         let line = match self.keymap_mode {
             KeymapMode::Normal => Line::from(Span::raw("")),
-            KeymapMode::Insert => Line::from(Span::raw(format!(" {}", self.line.source()))),
+            KeymapMode::Insert => Line::from(Span::raw(format!(" {}", self.prompt.source()))),
         };
         Paragraph::new(line)
     }
@@ -417,9 +433,9 @@ impl AppState<'_> {
         frame.render_widget(mode, mode_l);
         frame.render_widget(input, input_l);
 
-        if self.line.show_cursor {
+        if self.prompt.show_cursor {
             frame.set_cursor_position(Position::new(
-                input_l.x + (self.line.source().len() as u16) + 1,
+                input_l.x + (self.prompt.source().len() as u16) + 1,
                 input_l.y,
             ));
         }
@@ -433,8 +449,34 @@ fn ev_key_press(ev: &CrosstermEvent) -> Option<&KeyEvent> {
     }
 }
 
+//
+// focus -> list, preview, prompt,
+// prompt -> state
+// results -> list of pins
+// results_state -> the selected item
+// show_preview -> bool
+// state -> runing, quite
+// filters -> view [FilterMode::workplace]
+// context -> context,
+//
+//  Event
+// // keymap_mode -> vim style, normal style
+//  Query
+// // database -> database reference
+//
+//
+
+// UiAction -> app command
+//  - start search
+//  - line input
+//  -
+
 enum Event {
-    Tick,
+    AsyncDb(),
+    KeyInput(KeyEvent),
+    TerminalRepaint,
+    TerminalTick,
+    Quit,
 }
 
 struct EventManager {
@@ -446,21 +488,21 @@ struct EventManager {
 pub async fn run(_settings: &Settings, db: &Database, context: &Context) -> Result<()> {
     tui::install_hooks()?;
     let mut terminal = tui::init()?;
+    let (tx, rx) = mpsc::unbounded_channel();
     let mut app = AppState {
         page: PageState::List,
         results_state: ListState::default(),
         keymap_mode: KeymapMode::Normal,
-        line: LineState {
+        prompt: PromptState {
             input: InputCursor::from("".to_string()),
             show_cursor: false,
-            mode: LineMode::Info,
+            mode: PromptMode::Info,
         },
         results: vec![],
         running: RunningState::Active,
         context: context.clone(),
         database: db,
     };
-    let (tx, rx) = mpsc::unbounded_channel();
     let mut event_manager = EventManager {
         crossterm: EventStream::new(),
         events: rx,
@@ -482,7 +524,7 @@ pub async fn run(_settings: &Settings, db: &Database, context: &Context) -> Resu
                     // TODO: there can be Some(Err()). Not sure if we need to handle it
                     _ => None
                 },
-                _ = sleep(Duration::from_millis(200)) => Some(Event::Tick)
+                _ = sleep(Duration::from_millis(200)) => Some(Event::TerminalTick)
             } {
                 Some(ev) => break Some(ev),
                 _ => {}
@@ -490,24 +532,23 @@ pub async fn run(_settings: &Settings, db: &Database, context: &Context) -> Resu
         };
 
         while let Some(ev) = event {
-            event = app.handle_event(ev).await;
+            match ev {
+                Event::TerminalRepaint => {
+                    terminal.clear().expect("Failed to clear terminal");
+                    break;
+                }
+                ev => {
+                    event = app.handle_event(ev).await;
+                }
+            }
         }
 
-        // match event.next().await {
-        //     Some(Ok(ev)) => {
-        //         if let Some(key_ev) = ev_key_press(&ev) {
-        //             app.handle_key_events(key_ev, &mut terminal);
-        //         }
-        //     }
-        //     _ => {}
-        // }
-
-        if app.line.source().len() > 0 || matches!(app.keymap_mode, KeymapMode::Insert) {
+        if app.prompt.source().len() > 0 || matches!(app.keymap_mode, KeymapMode::Insert) {
             app.query_list(context).await?
         }
     }
 
-    tui::restore()?;m
+    tui::restore()?;
 
     Ok(())
 }
