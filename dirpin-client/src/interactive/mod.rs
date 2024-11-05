@@ -165,6 +165,7 @@ struct AppState<'a> {
     context: Context,
     running: RunningState,
     database: &'a Database,
+    show_preview: bool,
 }
 
 impl AppState<'_> {
@@ -265,6 +266,12 @@ impl AppState<'_> {
         Some(Event::TerminalRepaint)
     }
 
+    fn handle_toggle_preview(&mut self) -> Option<Event> {
+        self.show_preview = !self.show_preview;
+
+        None
+    }
+
     // TODO: implement a sequence of keys
     fn handle_terminal_event(&mut self, ev: CrosstermEvent) -> Option<Event> {
         match ev {
@@ -295,6 +302,7 @@ impl AppState<'_> {
                 KeyCode::Char('k') => self.handle_search_up(),
                 KeyCode::Char('e') => self.handle_edit().await,
                 KeyCode::Char('/') => self.handle_keymap_mode(KeymapMode::Insert),
+                KeyCode::Char('p') => self.handle_toggle_preview(),
                 _ => None,
             },
             KeymapMode::Insert => match key_event.code {
@@ -399,17 +407,12 @@ impl AppState<'_> {
             Direction::Horizontal,
             vec![Constraint::Ratio(1, 4), Constraint::Ratio(3, 4)],
         );
-        let layout_main = Layout::new(
-            Direction::Horizontal,
-            vec![Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)],
-        );
         let layout_line = Layout::new(
             Direction::Horizontal,
             vec![Constraint::Length(10), Constraint::Min(0)],
         );
         let [header_l, context_l, main_l, line_l] = layout.areas(frame.size());
         let [title_l, help_l] = layout_header.areas(header_l);
-        let [list_l, preview_l] = layout_main.areas(main_l);
         let [mode_l, input_l] = layout_line.areas(line_l);
 
         let title = self.build_title();
@@ -428,8 +431,19 @@ impl AppState<'_> {
         frame.render_widget(title, title_l);
         frame.render_widget(help, help_l);
         frame.render_widget(context, context_l);
-        frame.render_stateful_widget(content, list_l, &mut state);
-        frame.render_widget(preview, preview_l);
+
+        if self.show_preview {
+            let layout_main = Layout::new(
+                Direction::Horizontal,
+                vec![Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)],
+            );
+            let [list_l, preview_l] = layout_main.areas(main_l);
+            frame.render_stateful_widget(content, list_l, &mut state);
+            frame.render_widget(preview, preview_l);
+        } else {
+            frame.render_stateful_widget(content, main_l, &mut state);
+        }
+
         frame.render_widget(mode, mode_l);
         frame.render_widget(input, input_l);
 
@@ -498,6 +512,7 @@ pub async fn run(_settings: &Settings, db: &Database, context: &Context) -> Resu
             show_cursor: false,
             mode: PromptMode::Info,
         },
+        show_preview: false,
         results: vec![],
         running: RunningState::Active,
         context: context.clone(),
