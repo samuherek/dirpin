@@ -5,23 +5,22 @@ use crossterm::event::{
     Event as CrosstermEvent, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
 };
 use crossterm::execute;
-use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
-};
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen};
 use eyre::{Context as EyreContext, Result};
 use futures_util::stream::StreamExt;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Position, Rect};
 use ratatui::prelude::{Buffer, Widget};
 use ratatui::style::palette::tailwind::{GRAY, SLATE, YELLOW};
 use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span, Text};
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph, StatefulWidget};
-use ratatui::{Frame, Terminal};
+use ratatui::Frame;
 use std::fs::{self, File};
 use std::io::stdout;
 use std::io::Write;
 use std::path::Path;
 use std::process::Command;
+use time::OffsetDateTime;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
 
@@ -29,51 +28,37 @@ mod tui;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-enum RunningState {
-    Active,
-    Quit,
-}
+fn handle_active_entry_list(state: &mut AppState, event: &KeyEvent) -> Option<Event> {
+    match event.code {
+        KeyCode::Char('j') => state.entry_list.list.move_down(),
+        KeyCode::Char('k') => state.entry_list.list.move_up(),
+        KeyCode::Char('f') => state.entry_list.cycle_context_mode(),
+        _ => {}
+    }
 
-enum PageState {
-    List,
-}
-
-struct EntryList<'a> {
-    list: &'a [Pin],
+    None
 }
 
 #[derive(Default, Clone)]
-struct ListState {
+struct StatefullList {
     offset: usize,
     selected: usize,
     entries_len: usize,
 }
 
-impl ListState {
-    fn selected(&self) -> usize {
-        self.selected
-    }
-
-    fn select(&mut self, i: usize) {
-        self.selected = i;
-    }
+struct EntryListWidget<'a> {
+    items: &'a [Pin],
 }
 
-impl<'a> EntryList<'a> {
-    fn new(list: &'a [Pin]) -> Self {
-        Self { list }
-    }
-}
-
-impl<'a> StatefulWidget for EntryList<'a> {
-    type State = ListState;
+impl<'a> StatefulWidget for EntryListWidget<'a> {
+    type State = StatefullList;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         let height = area.height as usize;
         let block = Block::new();
 
         let lines = self
-            .list
+            .items
             .iter()
             .skip(state.offset)
             .take(height)
@@ -91,11 +76,6 @@ impl<'a> StatefulWidget for EntryList<'a> {
             .collect::<Vec<_>>();
         Paragraph::new(lines).block(block).render(area, buf);
     }
-}
-
-enum KeymapMode {
-    Normal,
-    Insert,
 }
 
 enum PromptMode {
@@ -144,130 +124,313 @@ impl From<String> for InputCursor {
     }
 }
 
-struct PromptState {
-    input: InputCursor,
-    show_cursor: bool,
-    mode: PromptMode,
+enum PromptSearchStep {
+    Edit,
+    Submit,
 }
 
-impl PromptState {
+struct PromptSearch {
+    input: InputCursor,
+    show_cursor: bool,
+    steps: PromptSearchStep,
+}
+
+impl PromptSearch {
     fn source(&self) -> &str {
         self.input.as_str()
     }
 }
 
-struct AppState<'a> {
-    page: PageState,
-    results_state: ListState,
-    keymap_mode: KeymapMode,
-    prompt: PromptState,
-    results: Vec<Pin>,
-    context: Context,
-    running: RunningState,
-    database: &'a Database,
+enum PromptState {
+    Default,
+    Input,
+    Search(PromptSearch),
+    Info,
+}
+
+impl PromptState {
+    fn prefix(&self) -> Option<&str> {
+        None
+    }
+
+    fn value(&self) -> &str {
+        match self {
+            PromptState::Default => "Type : to entr command",
+            PromptState::Input => "TODO: input",
+            PromptState::Search(s) => s.source(),
+            PromptState::Info => "TODO: info",
+        }
+    }
+
+    fn style(&self) -> Style {
+        match self {
+            PromptState::Default => Style::new().fg(GRAY.c500),
+            PromptState::Input => todo!(),
+            PromptState::Search(_) => todo!(),
+            PromptState::Info => todo!(),
+        }
+    }
+}
+
+struct PromptWidget<'a> {
+    prefix: &'a str,
+    value: &'a str,
+    style: Style,
+}
+
+impl<'a> Widget for PromptWidget<'a> {
+    fn render(self, area: Rect, buf: &mut Buffer)
+    where
+        Self: Sized,
+    {
+        // frame.render_widget(input, input_l);
+        //
+        // if self.prompt.show_cursor {
+        //     frame.set_cursor_position(Position::new(
+        //         input_l.x + (self.prompt.source().len() as u16) + 1,
+        //         input_l.y,
+        //     ));
+        // }
+        //
+        // let line = match self.keymap_mode {
+        //     KeymapMode::Normal => Line::from(Span::raw("")),
+        //     KeymapMode::Insert => Line::from(Span::raw(format!(" {}", self.prompt.source()))),
+        // };
+        // Paragraph::new(line)
+        let layout = Layout::new(
+            Direction::Horizontal,
+            [Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)],
+        );
+        let [left_l, right_l] = layout.areas(area);
+
+        let prompt =
+            Line::from(vec![Span::raw(self.prefix), Span::raw(self.value)]).style(self.style);
+
+        let help = Line::from(vec![
+            Span::raw("   Search "),
+            Span::styled(" / ", Style::new().bg(SLATE.c800).fg(GRAY.c400)),
+            Span::raw("   Help "),
+            Span::styled(" ? ", Style::new().bg(SLATE.c800).fg(GRAY.c400)),
+            Span::raw("   Exit "),
+            Span::styled(" C-c ", Style::new().bg(SLATE.c800).fg(GRAY.c400)),
+        ])
+        .style(Style::new().fg(GRAY.c200))
+        .alignment(Alignment::Right);
+
+        Paragraph::new(prompt).render(left_l, buf);
+        Paragraph::new(help).render(right_l, buf);
+    }
+}
+
+trait SelectableList {
+    type Item;
+
+    fn selected(&self) -> Option<&Self::Item>;
+    fn selected_mut(&mut self) -> Option<&mut Self::Item>;
+    fn move_up(&mut self);
+    fn move_down(&mut self);
+}
+
+struct List<T> {
+    items: Vec<T>,
+    offset: usize,
+    selected: usize,
+}
+
+impl<T> List<T> {
+    fn new(items: Vec<T>) -> Self {
+        Self {
+            items,
+            offset: 0,
+            selected: 0,
+        }
+    }
+
+    fn offset(&self) -> usize {
+        self.offset
+    }
+
+    fn selected(&self) -> usize {
+        self.selected
+    }
+
+    fn set_data(&mut self, data: Vec<T>) {
+        // TODO: we probably don't want to replace it all the time.
+        // Instead just clear and load the data to the same vector?
+        self.items = data;
+        self.offset = 0;
+        self.selected = 0;
+    }
+}
+
+impl<T> SelectableList for List<T> {
+    type Item = T;
+
+    fn selected(&self) -> Option<&Self::Item> {
+        self.items.get(self.selected)
+    }
+
+    fn selected_mut(&mut self) -> Option<&mut Self::Item> {
+        self.items.get_mut(self.selected)
+    }
+
+    fn move_up(&mut self) {
+        self.selected = self.selected.saturating_sub(1);
+    }
+
+    fn move_down(&mut self) {
+        self.selected = (self.selected + 1).min(self.items.len().saturating_sub(1));
+    }
+}
+
+enum ActiveEntryContext {
+    Workspace,
+    Directory,
+    Global,
+}
+
+struct EntryList {
+    list: List<Pin>,
     show_preview: bool,
+    context: Context,
+    filter_mode: FilterMode,
+    refetch: bool,
+}
+
+impl EntryList {
+    fn items(&self) -> &[Pin] {
+        &self.list.items
+    }
+
+    fn set_data(&mut self, data: Vec<Pin>) {
+        self.list.set_data(data);
+    }
+
+    fn set_context_mode(&mut self, next_context: FilterMode) {
+        self.filter_mode = next_context;
+    }
+
+    fn cycle_context_mode(&mut self) {
+        match self.filter_mode {
+            FilterMode::Workspace => self.set_context_mode(FilterMode::Global),
+            FilterMode::Directory => self.set_context_mode(FilterMode::Workspace),
+            FilterMode::Global => self.set_context_mode(FilterMode::Directory),
+        }
+    }
+}
+
+struct DirList {
+    list: List<String>,
+}
+
+enum BlockFocus {
+    List,
+    Prompt,
+}
+
+enum Route {
+    EntryList,
+    DirectoryList,
+    Help,
+}
+
+enum RunningState {
+    Active,
+    Quit,
+}
+
+struct AppState<'a> {
+    route: Route,
+    entry_list: EntryList,
+    directory_list: DirList,
+    prompt: PromptState,
+    block_focus: BlockFocus,
+    database: &'a Database,
+    status: RunningState,
 }
 
 impl AppState<'_> {
-    async fn query_list(&mut self, ctx: &Context) -> Result<()> {
-        self.results = self
+    async fn query_entry_list(&mut self) -> Result<()> {
+        let data = self
             .database
-            .list(&[FilterMode::Workspace], ctx, self.prompt.source())
+            .list(&[FilterMode::Workspace], &self.entry_list.context, "")
             .await?;
+        self.entry_list.set_data(data);
+
         Ok(())
     }
 
     async fn query_save(&self, item: &Pin) -> Result<()> {
-        self.database.save(item).await?;
+        // self.database.save(item).await?;
 
         Ok(())
     }
 
     fn quit(&mut self) {
-        self.running = RunningState::Quit;
+        self.status = RunningState::Quit;
     }
 
     fn running(&self) -> bool {
-        match self.running {
+        match self.status {
             RunningState::Active => true,
             RunningState::Quit => false,
         }
     }
 
-    fn selected(&self) -> Option<&Pin> {
-        self.results.get(self.results_state.selected())
-    }
-
-    fn selected_mut(&mut self) -> Option<&mut Pin> {
-        self.results.get_mut(self.results_state.selected())
-    }
-
-    fn handle_search_down(&mut self) -> Option<Event> {
-        let i = self.results_state.selected() + 1;
-        self.results_state
-            .select(i.min(self.results.len().saturating_sub(1)));
-
-        None
-    }
-
-    fn handle_search_up(&mut self) -> Option<Event> {
-        let i = self.results_state.selected().saturating_sub(1);
-        self.results_state.select(i);
-
-        None
-    }
-
-    fn handle_keymap_mode(&mut self, mode: KeymapMode) -> Option<Event> {
-        match mode {
-            KeymapMode::Normal => {
-                self.prompt.input.clear();
-                self.prompt.show_cursor = false;
-            }
-            KeymapMode::Insert => self.prompt.show_cursor = true,
-        }
-        self.keymap_mode = mode;
+    fn handle_keymap_mode(&mut self) -> Option<Event> {
+        // match mode {
+        //     KeymapMode::Normal => {
+        //         self.prompt.input.clear();
+        //         self.prompt.show_cursor = false;
+        //     }
+        //     KeymapMode::Insert => self.prompt.show_cursor = true,
+        // }
+        // self.keymap_mode = mode;
 
         None
     }
 
     async fn handle_edit(&mut self) -> Option<Event> {
-        let temp_path = Path::new("/tmp/temp_edit.txt");
-        let mut temp_file = File::create(temp_path).expect("");
-        let selected = self.selected().unwrap();
-
-        writeln!(temp_file, "{}", &selected.data).expect("Failed to to write to file");
-        drop(temp_file);
-        disable_raw_mode().expect("Failed to disable raw mode");
-
-        let editor = std::env::var("EDITOR").unwrap_or_else(|_| "nano".to_string());
-        Command::new(editor)
-            .arg(temp_path)
-            .status()
-            .expect("Failed to open editor");
-        let next_data = fs::read_to_string(temp_path).expect("Failed to read from file");
-        let next_data = next_data.lines().next();
-        fs::remove_file(temp_path).expect("Failed to delete file");
-
-        if let Some(text) = next_data {
-            if text != selected.data {
-                let item = {
-                    let item = self.selected_mut().expect("Failed to get selected item");
-                    item.data = text.to_string();
-                    item.clone()
-                };
-                self.query_save(&item)
-                    .await
-                    .expect("Failed to save to database");
-            }
-        }
-
-        execute!(stdout(), EnterAlternateScreen).expect("Failed to enter alternate screen");
-        enable_raw_mode().expect("Failed to enable raw mode");
-        Some(Event::TerminalRepaint)
+        // let temp_path = Path::new("/tmp/temp_edit.txt");
+        // let mut temp_file = File::create(temp_path).expect("");
+        // let selected = self.list.selected().unwrap();
+        //
+        // writeln!(temp_file, "{}", &selected.data).expect("Failed to to write to file");
+        // drop(temp_file);
+        // disable_raw_mode().expect("Failed to disable raw mode");
+        //
+        // let editor = std::env::var("EDITOR").unwrap_or_else(|_| "nano".to_string());
+        // Command::new(editor)
+        //     .arg(temp_path)
+        //     .status()
+        //     .expect("Failed to open editor");
+        // let next_data = fs::read_to_string(temp_path).expect("Failed to read from file");
+        // let next_data = next_data.lines().next();
+        // fs::remove_file(temp_path).expect("Failed to delete file");
+        //
+        // if let Some(text) = next_data {
+        //     if text != selected.data {
+        //         let item = {
+        //             let item = self.selected_mut().expect("Failed to get selected item");
+        //             item.data = text.to_string();
+        //             item.version += 1;
+        //             item.updated_at = OffsetDateTime::now_utc();
+        //             item.clone()
+        //         };
+        //         self.query_save(&item)
+        //             .await
+        //             .expect("Failed to save to database");
+        //     }
+        // }
+        //
+        // execute!(stdout(), EnterAlternateScreen).expect("Failed to enter alternate screen");
+        // enable_raw_mode().expect("Failed to enable raw mode");
+        // Some(Event::TerminalRepaint)
+        None
     }
 
     fn handle_toggle_preview(&mut self) -> Option<Event> {
-        self.show_preview = !self.show_preview;
+        // self.show_preview = !self.show_preview;
 
         None
     }
@@ -284,40 +447,53 @@ impl AppState<'_> {
         }
     }
 
+    fn handle_global_exit(&mut self, event: &KeyEvent) -> bool {
+        let ctrl = event.modifiers.contains(KeyModifiers::CONTROL);
+        match event.code {
+            KeyCode::Char('c') if ctrl => {
+                self.quit();
+                true
+            }
+            _ => false,
+        }
+    }
+
     async fn handle_key_input(&mut self, key_event: KeyEvent) -> Option<Event> {
         let mut event = None;
         let ctrl = key_event.modifiers.contains(KeyModifiers::CONTROL);
 
-        match key_event.code {
-            KeyCode::Char('c') if ctrl => {
-                self.quit();
-                return event;
-            }
-            _ => {}
+        if self.handle_global_exit(&key_event) {
+            return event;
         }
 
-        event = match self.keymap_mode {
-            KeymapMode::Normal => match key_event.code {
-                KeyCode::Char('j') => self.handle_search_down(),
-                KeyCode::Char('k') => self.handle_search_up(),
-                KeyCode::Char('e') => self.handle_edit().await,
-                KeyCode::Char('/') => self.handle_keymap_mode(KeymapMode::Insert),
-                KeyCode::Char('p') => self.handle_toggle_preview(),
-                _ => None,
-            },
-            KeymapMode::Insert => match key_event.code {
-                KeyCode::Esc => self.handle_keymap_mode(KeymapMode::Normal),
-                KeyCode::Char(c) => {
-                    self.prompt.input.insert(c);
-                    None
-                }
-                KeyCode::Backspace => {
-                    self.prompt.input.remove();
-                    None
-                }
-                _ => None,
-            },
+        // Ignore the tmux ctrl-a
+        event = match self.route {
+            Route::EntryList => handle_active_entry_list(self, &key_event),
+            Route::DirectoryList => todo!(),
+            Route::Help => todo!(),
         };
+        // event = match self.keymap_mode {
+        //     KeymapMode::Normal => match key_event.code {
+        //         KeyCode::Char('j') => self.handle_search_down(),
+        //         KeyCode::Char('k') => self.handle_search_up(),
+        //         KeyCode::Char('e') => self.handle_edit().await,
+        //         KeyCode::Char('/') => self.handle_keymap_mode(KeymapMode::Insert),
+        //         KeyCode::Char('p') => self.handle_toggle_preview(),
+        //         _ => None,
+        //     },
+        //     KeymapMode::Insert => match key_event.code {
+        //         KeyCode::Esc => self.handle_keymap_mode(KeymapMode::Normal),
+        //         KeyCode::Char(c) => {
+        //             self.prompt.input.insert(c);
+        //             None
+        //         }
+        //         KeyCode::Backspace => {
+        //             self.prompt.input.remove();
+        //             None
+        //         }
+        //         _ => None,
+        //     },
+        // };
 
         event
     }
@@ -330,67 +506,90 @@ impl AppState<'_> {
         }
     }
 
-    fn build_title(&self) -> Paragraph {
-        Paragraph::new(format!("Dirpin v{VERSION}"))
-    }
-
-    fn build_help(&self) -> Paragraph {
-        Paragraph::new(Line::from(vec![
-            Span::styled("<ctrl-c>", Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(": exit"),
-        ]))
-        .alignment(Alignment::Right)
-        .style(Style::new().fg(GRAY.c500))
-    }
-
     fn build_context(&self) -> Paragraph {
         Paragraph::new(Line::from(vec![
             Span::styled("[ workspace ] ", Style::new().fg(GRAY.c500)),
-            Span::styled(&self.context.cwd, Style::new().fg(SLATE.c500)),
+            Span::styled(&self.entry_list.context.cwd, Style::new().fg(SLATE.c500)),
         ]))
     }
 
-    fn build_list(&self) -> EntryList {
-        EntryList {
-            list: &self.results,
+    fn render_entry_list(&self, frame: &mut Frame, rect: Rect) {
+        // TODO: This is not ideal but I am too tired this evening to think
+        // about how to set this up. We create a new state for each rerender.
+        // let state: StatefullList = self.entry_list.list.into();
+        let state = &self.entry_list.list;
+        let height = rect.height as usize;
+
+        let lines = self
+            .entry_list
+            .items()
+            .iter()
+            .skip(state.offset)
+            .take(height)
+            .enumerate()
+            .map(|(i, x)| {
+                if i == state.selected {
+                    Line::from(vec![
+                        Span::styled(" > ", Style::new().fg(SLATE.c500)),
+                        Span::styled(x.data.as_str(), Style::new().fg(SLATE.c500)),
+                    ])
+                } else {
+                    Line::from(vec![Span::raw("   "), Span::raw(x.data.as_str())])
+                }
+            })
+            .collect::<Vec<_>>();
+
+        match lines.len() {
+            0 => frame.render_widget(
+                Paragraph::new(Line::from(vec![Span::styled(
+                    "No entries",
+                    Style::new().fg(GRAY.c500),
+                )])),
+                rect,
+            ),
+            _ => {
+                let content = Paragraph::new(lines);
+
+                if self.entry_list.show_preview {
+                    let layout_main = Layout::new(
+                        Direction::Horizontal,
+                        vec![Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)],
+                    );
+                    let [list_l, preview_l] = layout_main.areas(rect);
+
+                    frame.render_widget(content, list_l);
+                    // frame.render_widget(preview, preview_l);
+                } else {
+                    frame.render_widget(content, rect);
+                }
+            }
         }
     }
 
     fn build_preview(&self) -> Paragraph {
-        let content = if let Some(el) = self.selected() {
-            let created_at = el.created_at.to_string();
-            let updated_at = el.updated_at.to_string();
-            let text = el.data.as_str();
-            vec![
-                Line::from(Span::raw(text)),
-                Line::from(Span::raw(format!("Created at: {}", created_at))),
-                Line::from(Span::raw(format!("Updated at: {}", updated_at))),
-            ]
-        } else {
-            vec![Line::from(Span::raw("N/A"))]
-        };
+        // let content = if let Some(el) = self.selected() {
+        //     let created_at = el.created_at.to_string();
+        //     let updated_at = el.updated_at.to_string();
+        //     let text = el.data.as_str();
+        //     vec![
+        //         Line::from(Span::raw(text)),
+        //         Line::from(Span::raw(format!("Created at: {}", created_at))),
+        //         Line::from(Span::raw(format!("Updated at: {}", updated_at))),
+        //     ]
+        // } else {
+        // vec![Line::from(Span::raw("N/A"))]
+        // };
+        let content = vec![Line::from(Span::raw("N/A"))];
 
         Paragraph::new(content).block(Block::bordered().border_style(GRAY.c500))
     }
 
-    fn build_mode(&self) -> Paragraph {
-        let line = match self.keymap_mode {
-            KeymapMode::Normal => {
-                Line::from(Span::styled("[ normal ]", Style::new().fg(GRAY.c500)))
-            }
-            KeymapMode::Insert => {
-                Line::from(Span::styled("[ insert ]", Style::new().fg(YELLOW.c500)))
-            }
-        };
-        Paragraph::new(line)
-    }
-
-    fn build_input(&self) -> Paragraph {
-        let line = match self.keymap_mode {
-            KeymapMode::Normal => Line::from(Span::raw("")),
-            KeymapMode::Insert => Line::from(Span::raw(format!(" {}", self.prompt.source()))),
-        };
-        Paragraph::new(line)
+    fn build_prompt(&self) -> PromptWidget {
+        PromptWidget {
+            prefix: self.prompt.prefix().unwrap_or(""),
+            value: self.prompt.value(),
+            style: self.prompt.style(),
+        }
     }
 
     fn render_page(&mut self, frame: &mut Frame) {
@@ -398,61 +597,21 @@ impl AppState<'_> {
             Direction::Vertical,
             vec![
                 Constraint::Length(2),
-                Constraint::Length(2),
                 Constraint::Min(1),
                 Constraint::Length(1),
             ],
         );
-        let layout_header = Layout::new(
-            Direction::Horizontal,
-            vec![Constraint::Ratio(1, 4), Constraint::Ratio(3, 4)],
-        );
-        let layout_line = Layout::new(
-            Direction::Horizontal,
-            vec![Constraint::Length(10), Constraint::Min(0)],
-        );
-        let [header_l, context_l, main_l, line_l] = layout.areas(frame.size());
-        let [title_l, help_l] = layout_header.areas(header_l);
-        let [mode_l, input_l] = layout_line.areas(line_l);
+        let [context_l, main_l, prompt_l] = layout.areas(frame.area());
 
-        let title = self.build_title();
-        let help = self.build_help();
-        let context = self.build_context();
-        let content = match self.page {
-            PageState::List => self.build_list(),
-        };
-        let preview = self.build_preview();
-        let mode = self.build_mode();
-        let input = self.build_input();
-        // TODO: This is not idea but I am too tired this evening to think
-        // about how to set this up.
-        let mut state = self.results_state.clone();
-
-        frame.render_widget(title, title_l);
-        frame.render_widget(help, help_l);
-        frame.render_widget(context, context_l);
-
-        if self.show_preview {
-            let layout_main = Layout::new(
-                Direction::Horizontal,
-                vec![Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)],
-            );
-            let [list_l, preview_l] = layout_main.areas(main_l);
-            frame.render_stateful_widget(content, list_l, &mut state);
-            frame.render_widget(preview, preview_l);
-        } else {
-            frame.render_stateful_widget(content, main_l, &mut state);
+        frame.render_widget(self.build_context(), context_l);
+        match self.route {
+            Route::EntryList => {
+                self.render_entry_list(frame, main_l);
+            }
+            Route::DirectoryList => todo!(),
+            Route::Help => todo!(),
         }
-
-        frame.render_widget(mode, mode_l);
-        frame.render_widget(input, input_l);
-
-        if self.prompt.show_cursor {
-            frame.set_cursor_position(Position::new(
-                input_l.x + (self.prompt.source().len() as u16) + 1,
-                input_l.y,
-            ));
-        }
+        frame.render_widget(self.build_prompt(), prompt_l);
     }
 }
 
@@ -486,7 +645,6 @@ fn ev_key_press(ev: &CrosstermEvent) -> Option<&KeyEvent> {
 //  -
 
 enum Event {
-    AsyncDb(),
     KeyInput(KeyEvent),
     TerminalRepaint,
     TerminalTick,
@@ -499,24 +657,33 @@ struct EventManager {
     dispatch: mpsc::UnboundedSender<Event>,
 }
 
+enum Focus {
+    Preview,
+    Prompt,
+    List,
+    Help,
+}
+
 pub async fn run(_settings: &Settings, db: &Database, context: &Context) -> Result<()> {
     tui::install_hooks()?;
     let mut terminal = tui::init()?;
     let (tx, rx) = mpsc::unbounded_channel();
     let mut app = AppState {
-        page: PageState::List,
-        results_state: ListState::default(),
-        keymap_mode: KeymapMode::Normal,
-        prompt: PromptState {
-            input: InputCursor::from("".to_string()),
-            show_cursor: false,
-            mode: PromptMode::Info,
+        route: Route::EntryList,
+        entry_list: EntryList {
+            list: List::new(Vec::new()),
+            show_preview: false,
+            context: context.clone(),
+            filter_mode: FilterMode::Workspace,
+            refetch: false,
         },
-        show_preview: false,
-        results: vec![],
-        running: RunningState::Active,
-        context: context.clone(),
+        directory_list: DirList {
+            list: List::new(Vec::new()),
+        },
+        prompt: PromptState::Default,
+        block_focus: BlockFocus::List,
         database: db,
+        status: RunningState::Active,
     };
     let mut event_manager = EventManager {
         crossterm: EventStream::new(),
@@ -524,7 +691,7 @@ pub async fn run(_settings: &Settings, db: &Database, context: &Context) -> Resu
         dispatch: tx.clone(),
     };
 
-    app.query_list(context).await?;
+    app.query_entry_list().await?;
 
     while app.running() {
         terminal
@@ -558,9 +725,13 @@ pub async fn run(_settings: &Settings, db: &Database, context: &Context) -> Resu
             }
         }
 
-        if app.prompt.source().len() > 0 || matches!(app.keymap_mode, KeymapMode::Insert) {
-            app.query_list(context).await?
+        if app.entry_list.refetch {
+            app.query_entry_list().await?;
+            app.entry_list.refetch = false;
         }
+        // if app.prompt.source().len() > 0 || matches!(app.keymap_mode, KeymapMode::Insert) {
+        //     app.query_list(context).await?
+        // }
     }
 
     tui::restore()?;

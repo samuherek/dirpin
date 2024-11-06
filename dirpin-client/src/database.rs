@@ -14,7 +14,7 @@ use uuid::Uuid;
 
 #[derive(Debug)]
 pub enum FilterMode {
-    Gloabl,
+    Global,
     Directory,
     Workspace,
 }
@@ -113,7 +113,7 @@ impl Database {
         .bind(v.cwd.as_str())
         .bind(v.cgd.as_ref().map(|x| x.as_str()))
         .bind(v.created_at.unix_timestamp_nanos() as i64)
-        .bind(v.created_at.unix_timestamp_nanos() as i64)
+        .bind(v.updated_at.unix_timestamp_nanos() as i64)
         .bind(v.deleted_at.map(|x| x.unix_timestamp_nanos() as i64))
         .bind(v.version)
         .execute(&mut **tx)
@@ -164,7 +164,7 @@ impl Database {
         query.field("*").order_desc("updated_at");
         for filter in filters {
             match filter {
-                FilterMode::Gloabl => &mut query,
+                FilterMode::Global=> &mut query,
                 FilterMode::Directory => query.and_where_eq("cwd", quote(&context.cwd)),
                 FilterMode::Workspace => query.and_where_eq("cwd", quote(&context.cwd)),
             };
