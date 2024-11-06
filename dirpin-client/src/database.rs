@@ -1,5 +1,4 @@
 use crate::domain::Pin;
-use crate::settings::Settings;
 use crate::utils::get_host_user;
 use dirpin_common::utils;
 use eyre::Result;
@@ -12,11 +11,21 @@ use time::OffsetDateTime;
 use tracing::debug;
 use uuid::Uuid;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum FilterMode {
-    Global,
+    All,
     Directory,
     Workspace,
+}
+
+impl FilterMode {
+    pub fn as_str(&self) -> &str {
+        match self {
+            FilterMode::All => "all",
+            FilterMode::Directory => "directory",
+            FilterMode::Workspace => "workspace",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -26,6 +35,21 @@ pub struct Context {
     pub cgd: Option<String>,
 }
 
+/// We assume that the global context is the root of the computer
+/// and we assume there is no "git repo" in the root of the computer
+/// TODO: Please check the "get_root_dir" impl for comment about the
+/// widnows root dir.
+pub fn global_context() -> Context {
+    let hostname = get_host_user();
+    let cwd = utils::get_rooot_dir();
+    Context {
+        cwd,
+        hostname,
+        cgd: None,
+    }
+}
+
+/// Get the current entry context basd on the current directory path
 pub fn current_context() -> Context {
     let hostname = get_host_user();
     let cwd = utils::get_current_dir();
@@ -164,7 +188,7 @@ impl Database {
         query.field("*").order_desc("updated_at");
         for filter in filters {
             match filter {
-                FilterMode::Global=> &mut query,
+                FilterMode::All => &mut query,
                 FilterMode::Directory => query.and_where_eq("cwd", quote(&context.cwd)),
                 FilterMode::Workspace => query.and_where_eq("cwd", quote(&context.cwd)),
             };

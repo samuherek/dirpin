@@ -33,7 +33,29 @@ fn handle_active_entry_list(state: &mut AppState, event: &KeyEvent) -> Option<Ev
         KeyCode::Char('j') => state.entry_list.list.move_down(),
         KeyCode::Char('k') => state.entry_list.list.move_up(),
         KeyCode::Char('f') => state.entry_list.cycle_context_mode(),
+        KeyCode::Char('/') => state.set_prompt_search(PromptSearch::builder()),
         _ => {}
+    }
+
+    None
+}
+
+fn handle_prompt_search(state: &mut AppState, event: &KeyEvent) -> Option<Event> {
+    match &mut state.prompt {
+        PromptState::Search(search) => match event.code {
+            KeyCode::Esc => state.handle_prompt_search_exit(),
+            KeyCode::Char(c) => {
+                search.input.insert(c);
+                state.handle_refetch_search();
+            }
+            KeyCode::Backspace => {
+                search.input.remove();
+                state.handle_refetch_search();
+            }
+            KeyCode::Enter => {}
+            _ => {}
+        },
+        _ => unreachable!("Function call from wrong context"),
     }
 
     None
@@ -46,43 +68,7 @@ struct StatefullList {
     entries_len: usize,
 }
 
-struct EntryListWidget<'a> {
-    items: &'a [Pin],
-}
-
-impl<'a> StatefulWidget for EntryListWidget<'a> {
-    type State = StatefullList;
-
-    fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        let height = area.height as usize;
-        let block = Block::new();
-
-        let lines = self
-            .items
-            .iter()
-            .skip(state.offset)
-            .take(height)
-            .enumerate()
-            .map(|(i, x)| {
-                if i == state.selected {
-                    Line::from(vec![
-                        Span::styled(" > ", Style::new().fg(SLATE.c500)),
-                        Span::styled(x.data.as_str(), Style::new().fg(SLATE.c500)),
-                    ])
-                } else {
-                    Line::from(vec![Span::raw("   "), Span::raw(x.data.as_str())])
-                }
-            })
-            .collect::<Vec<_>>();
-        Paragraph::new(lines).block(block).render(area, buf);
-    }
-}
-
-enum PromptMode {
-    Info,
-    Search,
-}
-
+#[derive(Default)]
 struct InputCursor {
     source: String,
     index: usize,
@@ -116,6 +102,12 @@ impl InputCursor {
         self.source.clear();
         self.index = 0;
     }
+
+    fn set(&mut self, value: &str) {
+        self.source.clear();
+        self.source.push_str(value);
+        self.index = self.source.len();
+    }
 }
 
 impl From<String> for InputCursor {
@@ -132,11 +124,34 @@ enum PromptSearchStep {
 struct PromptSearch {
     input: InputCursor,
     show_cursor: bool,
-    steps: PromptSearchStep,
+    step: PromptSearchStep,
 }
 
 impl PromptSearch {
-    fn source(&self) -> &str {
+    fn builder() -> Self {
+        Self {
+            input: InputCursor::default(),
+            show_cursor: true,
+            step: PromptSearchStep::Edit,
+        }
+    }
+
+    fn input(mut self, value: &str) -> Self {
+        self.input.set(value);
+        self
+    }
+
+    fn step(mut self, step: PromptSearchStep) -> Self {
+        self.step = step;
+        self
+    }
+
+    fn cursor(mut self, show: bool) -> Self {
+        self.show_cursor = show;
+        self
+    }
+
+    fn value(&self) -> &str {
         self.input.as_str()
     }
 }
@@ -150,14 +165,19 @@ enum PromptState {
 
 impl PromptState {
     fn prefix(&self) -> Option<&str> {
-        None
+        match self {
+            PromptState::Default => None,
+            PromptState::Input => Some(": "),
+            PromptState::Search(_) => Some("Search: "),
+            PromptState::Info => None,
+        }
     }
 
     fn value(&self) -> &str {
         match self {
             PromptState::Default => "Type : to entr command",
             PromptState::Input => "TODO: input",
-            PromptState::Search(s) => s.source(),
+            PromptState::Search(s) => s.value(),
             PromptState::Info => "TODO: info",
         }
     }
@@ -166,9 +186,28 @@ impl PromptState {
         match self {
             PromptState::Default => Style::new().fg(GRAY.c500),
             PromptState::Input => todo!(),
-            PromptState::Search(_) => todo!(),
+            PromptState::Search(s) => match s.step {
+                PromptSearchStep::Edit => Style::default(),
+                PromptSearchStep::Submit => Style::new(),
+            },
             PromptState::Info => todo!(),
         }
+    }
+
+    fn get_search_input(&self) -> Option<&str> {
+        match self {
+            PromptState::Search(search) => Some(search.value()),
+            _ => None,
+        }
+    }
+
+    fn search() -> Self {
+        let search = PromptSearch::builder();
+        PromptState::Search(search)
+    }
+
+    fn set(&mut self, value: PromptState) {
+        *self = value;
     }
 }
 
@@ -186,10 +225,8 @@ impl<'a> Widget for PromptWidget<'a> {
         // frame.render_widget(input, input_l);
         //
         // if self.prompt.show_cursor {
-        //     frame.set_cursor_position(Position::new(
-        //         input_l.x + (self.prompt.source().len() as u16) + 1,
-        //         input_l.y,
-        //     ));
+        //     let len = self.prefix.len() + self.value.len();
+        //     frame.set_cursor_position(Position::new(input_l.x + (len as u16) + 1, input_l.y));
         // }
         //
         // let line = match self.keymap_mode {
@@ -283,12 +320,6 @@ impl<T> SelectableList for List<T> {
     }
 }
 
-enum ActiveEntryContext {
-    Workspace,
-    Directory,
-    Global,
-}
-
 struct EntryList {
     list: List<Pin>,
     show_preview: bool,
@@ -306,15 +337,20 @@ impl EntryList {
         self.list.set_data(data);
     }
 
+    fn ask_refetch(&mut self) {
+        self.refetch = true;
+    }
+
     fn set_context_mode(&mut self, next_context: FilterMode) {
         self.filter_mode = next_context;
+        self.ask_refetch();
     }
 
     fn cycle_context_mode(&mut self) {
         match self.filter_mode {
-            FilterMode::Workspace => self.set_context_mode(FilterMode::Global),
+            FilterMode::Workspace => self.set_context_mode(FilterMode::All),
             FilterMode::Directory => self.set_context_mode(FilterMode::Workspace),
-            FilterMode::Global => self.set_context_mode(FilterMode::Directory),
+            FilterMode::All => self.set_context_mode(FilterMode::Directory),
         }
     }
 }
@@ -326,6 +362,12 @@ struct DirList {
 enum BlockFocus {
     List,
     Prompt,
+}
+
+impl BlockFocus {
+    fn prompt(&mut self) {
+        *self = BlockFocus::Prompt
+    }
 }
 
 enum Route {
@@ -351,9 +393,11 @@ struct AppState<'a> {
 
 impl AppState<'_> {
     async fn query_entry_list(&mut self) -> Result<()> {
+        let filter_mode = self.entry_list.filter_mode.clone();
+        let search = self.prompt.get_search_input().unwrap_or("");
         let data = self
             .database
-            .list(&[FilterMode::Workspace], &self.entry_list.context, "")
+            .list(&[filter_mode], &self.entry_list.context, search)
             .await?;
         self.entry_list.set_data(data);
 
@@ -374,6 +418,24 @@ impl AppState<'_> {
         match self.status {
             RunningState::Active => true,
             RunningState::Quit => false,
+        }
+    }
+
+    fn set_prompt_search(&mut self, search: PromptSearch) {
+        self.block_focus.prompt();
+        self.prompt.set(PromptState::Search(search));
+    }
+
+    fn handle_prompt_search_exit(&mut self) {
+        self.block_focus = BlockFocus::List;
+        self.prompt = PromptState::Default;
+    }
+
+    fn handle_refetch_search(&mut self) {
+        match self.route {
+            Route::EntryList => self.entry_list.refetch = true,
+            Route::DirectoryList => todo!(),
+            Route::Help => todo!(),
         }
     }
 
@@ -460,18 +522,40 @@ impl AppState<'_> {
 
     async fn handle_key_input(&mut self, key_event: KeyEvent) -> Option<Event> {
         let mut event = None;
-        let ctrl = key_event.modifiers.contains(KeyModifiers::CONTROL);
+        // let ctrl = key_event.modifiers.contains(KeyModifiers::CONTROL);
 
+        // Handle global exit
         if self.handle_global_exit(&key_event) {
             return event;
         }
 
-        // Ignore the tmux ctrl-a
-        event = match self.route {
-            Route::EntryList => handle_active_entry_list(self, &key_event),
-            Route::DirectoryList => todo!(),
-            Route::Help => todo!(),
+        // Handle prompt events
+        event = match self.block_focus {
+            BlockFocus::List => match self.route {
+                Route::EntryList => handle_active_entry_list(self, &key_event),
+                Route::DirectoryList => None,
+                Route::Help => None,
+            },
+            BlockFocus::Prompt => match self.prompt {
+                PromptState::Search(_) => handle_prompt_search(self, &key_event),
+                PromptState::Input => todo!("handle prompt input"),
+                _ => None,
+            },
         };
+
+        // event = match self.route {
+        //     Route::EntryList => match self.block_focus {
+        //         BlockFocus::List => handle_active_entry_list(self, &key_event),
+        //         BlockFocus::Prompt => match self.prompt {
+        //             PromptState::Search(_) => handle_prompt_search_entry_list(self, &key_event),
+        //             PromptState::Input => todo!("handle prompt input"),
+        //             _ => None,
+        //         },
+        //     },
+        //     Route::DirectoryList => todo!(),
+        //     Route::Help => todo!(),
+        // };
+
         // event = match self.keymap_mode {
         //     KeymapMode::Normal => match key_event.code {
         //         KeyCode::Char('j') => self.handle_search_down(),
@@ -507,9 +591,29 @@ impl AppState<'_> {
     }
 
     fn build_context(&self) -> Paragraph {
+        // NOTE: This is set basd on the long set word as hardcoded value for now!
+        let max_len = format!("workspace").len();
+        let context_value = self.entry_list.filter_mode.as_str();
+        let padding = (max_len - context_value.len()) / 2;
+        let formatted = format!(
+            "[ {:^width$} ]",
+            context_value,
+            width = context_value.len() + padding * 2
+        );
+
+        let context_target = match self.entry_list.filter_mode {
+            FilterMode::All => &self.entry_list.context.hostname,
+            FilterMode::Directory => &self.entry_list.context.cwd,
+            FilterMode::Workspace => {
+                let value = self.entry_list.context.cgd.as_ref().map(|x| x.as_str());
+                value.unwrap_or_else(|| "Not available")
+            }
+        };
+
         Paragraph::new(Line::from(vec![
-            Span::styled("[ workspace ] ", Style::new().fg(GRAY.c500)),
-            Span::styled(&self.entry_list.context.cwd, Style::new().fg(SLATE.c500)),
+            Span::styled(formatted, Style::new().fg(GRAY.c500)),
+            Span::raw(" "),
+            Span::styled(context_target, Style::new().fg(SLATE.c500)),
         ]))
     }
 
@@ -612,6 +716,23 @@ impl AppState<'_> {
             Route::Help => todo!(),
         }
         frame.render_widget(self.build_prompt(), prompt_l);
+        self.set_prompt_cursor(frame, prompt_l);
+    }
+
+    fn set_prompt_cursor(&self, frame: &mut Frame, rect: Rect) {
+        match self.block_focus {
+            BlockFocus::Prompt => match self.prompt {
+                PromptState::Search(ref s) => {
+                    if s.show_cursor {
+                        let len =
+                            self.prompt.prefix().unwrap_or("").len() + self.prompt.value().len();
+                        frame.set_cursor_position(Position::new(rect.x + (len as u16), rect.y));
+                    }
+                }
+                _ => {}
+            },
+            _ => {}
+        }
     }
 }
 
@@ -621,28 +742,6 @@ fn ev_key_press(ev: &CrosstermEvent) -> Option<&KeyEvent> {
         _ => None,
     }
 }
-
-//
-// focus -> list, preview, prompt,
-// prompt -> state
-// results -> list of pins
-// results_state -> the selected item
-// show_preview -> bool
-// state -> runing, quite
-// filters -> view [FilterMode::workplace]
-// context -> context,
-//
-//  Event
-// // keymap_mode -> vim style, normal style
-//  Query
-// // database -> database reference
-//
-//
-
-// UiAction -> app command
-//  - start search
-//  - line input
-//  -
 
 enum Event {
     KeyInput(KeyEvent),

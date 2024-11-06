@@ -1,5 +1,5 @@
 use clap::Parser;
-use dirpin_client::database::{current_context, Database};
+use dirpin_client::database::{current_context, global_context, Database};
 use dirpin_client::domain::Pin;
 use dirpin_client::settings::Settings;
 use dirpin_common::utils;
@@ -9,11 +9,18 @@ use std::path::PathBuf;
 #[derive(Parser, Debug)]
 pub struct Cmd {
     value: Option<String>,
+
+    #[arg(short, long)]
+    global: bool,
 }
 
 impl Cmd {
     pub async fn run(self, settings: &Settings, db: &Database) -> Result<()> {
-        let context = current_context();
+        let context = if self.global {
+            global_context()
+        } else {
+            current_context()
+        };
         let db_path = PathBuf::from(&settings.db_path);
 
         if let Some(parent) = db_path.parent() {
