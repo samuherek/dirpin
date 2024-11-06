@@ -190,7 +190,10 @@ impl Database {
             match filter {
                 FilterMode::All => &mut query,
                 FilterMode::Directory => query.and_where_eq("cwd", quote(&context.cwd)),
-                FilterMode::Workspace => query.and_where_eq("cwd", quote(&context.cwd)),
+                FilterMode::Workspace => query.and_where_eq(
+                    "cwd",
+                    quote(context.cgd.as_ref().unwrap_or(&"XXXXXXXXXXXXXX".to_string())),
+                ),
             };
         }
         if !search.is_empty() {

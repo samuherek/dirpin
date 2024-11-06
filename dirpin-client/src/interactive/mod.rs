@@ -13,7 +13,7 @@ use ratatui::prelude::{Buffer, Widget};
 use ratatui::style::palette::tailwind::{GRAY, SLATE, YELLOW};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Paragraph, StatefulWidget};
+use ratatui::widgets::{Block, Borders, Paragraph, StatefulWidget};
 use ratatui::Frame;
 use std::fs::{self, File};
 use std::io::stdout;
@@ -28,12 +28,26 @@ mod tui;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+const HELP: &str = r#"
+    Help: This is the help seciton stuff;
+"#;
+
 fn handle_active_entry_list(state: &mut AppState, event: &KeyEvent) -> Option<Event> {
     match event.code {
         KeyCode::Char('j') => state.entry_list.list.move_down(),
         KeyCode::Char('k') => state.entry_list.list.move_up(),
         KeyCode::Char('f') => state.entry_list.cycle_context_mode(),
         KeyCode::Char('/') => state.set_prompt_search(PromptSearch::builder()),
+        _ => {}
+    }
+
+    None
+}
+
+fn handle_active_debug(state: &mut AppState, event: &KeyEvent) -> Option<Event> {
+    match event.code {
+        KeyCode::Char('j') => state.debug.move_down(1),
+        KeyCode::Char('k') => state.debug.move_up(1),
         _ => {}
     }
 
@@ -68,7 +82,7 @@ struct StatefullList {
     entries_len: usize,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct InputCursor {
     source: String,
     index: usize,
@@ -116,11 +130,13 @@ impl From<String> for InputCursor {
     }
 }
 
+#[derive(Debug)]
 enum PromptSearchStep {
     Edit,
     Submit,
 }
 
+#[derive(Debug)]
 struct PromptSearch {
     input: InputCursor,
     show_cursor: bool,
@@ -156,6 +172,7 @@ impl PromptSearch {
     }
 }
 
+#[derive(Debug)]
 enum PromptState {
     Default,
     Input,
@@ -222,18 +239,6 @@ impl<'a> Widget for PromptWidget<'a> {
     where
         Self: Sized,
     {
-        // frame.render_widget(input, input_l);
-        //
-        // if self.prompt.show_cursor {
-        //     let len = self.prefix.len() + self.value.len();
-        //     frame.set_cursor_position(Position::new(input_l.x + (len as u16) + 1, input_l.y));
-        // }
-        //
-        // let line = match self.keymap_mode {
-        //     KeymapMode::Normal => Line::from(Span::raw("")),
-        //     KeymapMode::Insert => Line::from(Span::raw(format!(" {}", self.prompt.source()))),
-        // };
-        // Paragraph::new(line)
         let layout = Layout::new(
             Direction::Horizontal,
             [Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)],
@@ -268,6 +273,7 @@ trait SelectableList {
     fn move_down(&mut self);
 }
 
+#[derive(Debug)]
 struct List<T> {
     items: Vec<T>,
     offset: usize,
@@ -320,6 +326,7 @@ impl<T> SelectableList for List<T> {
     }
 }
 
+#[derive(Debug)]
 struct EntryList {
     list: List<Pin>,
     show_preview: bool,
@@ -355,13 +362,16 @@ impl EntryList {
     }
 }
 
+#[derive(Debug)]
 struct DirList {
     list: List<String>,
 }
 
+#[derive(Debug, Clone)]
 enum BlockFocus {
     List,
     Prompt,
+    Debug,
 }
 
 impl BlockFocus {
@@ -370,15 +380,34 @@ impl BlockFocus {
     }
 }
 
+#[derive(Debug)]
 enum Route {
     EntryList,
     DirectoryList,
     Help,
 }
 
+#[derive(Debug)]
 enum RunningState {
     Active,
     Quit,
+}
+
+#[derive(Debug)]
+struct Debug {
+    show: bool,
+    return_focus: Option<BlockFocus>,
+    scroll_offset: usize,
+}
+
+impl Debug {
+    fn move_down(&mut self, offset: usize) {
+        self.scroll_offset += offset;
+    }
+
+    fn move_up(&mut self, offset: usize) {
+        self.scroll_offset = self.scroll_offset.saturating_sub(offset);
+    }
 }
 
 struct AppState<'a> {
@@ -389,6 +418,20 @@ struct AppState<'a> {
     block_focus: BlockFocus,
     database: &'a Database,
     status: RunningState,
+    debug: Debug,
+}
+
+impl<'a> std::fmt::Debug for AppState<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AppState")
+            .field("route", &self.route)
+            .field("entry_list", &self.entry_list)
+            .field("prompt", &self.prompt)
+            .field("block_focus", &self.block_focus)
+            .field("status", &self.status)
+            .field("debug", &self.debug)
+            .finish()
+    }
 }
 
 impl AppState<'_> {
@@ -520,6 +563,25 @@ impl AppState<'_> {
         }
     }
 
+    fn handle_debug_toggle(&mut self, event: &KeyEvent) -> bool {
+        let ctrl = event.modifiers.contains(KeyModifiers::CONTROL);
+
+        match event.code {
+            KeyCode::Char('d') if ctrl => {
+                if self.debug.show {
+                    self.block_focus = self.debug.return_focus.clone().unwrap_or(BlockFocus::List);
+                    self.debug.show = false;
+                } else {
+                    self.debug.return_focus = Some(self.block_focus.clone());
+                    self.debug.show = true;
+                    self.block_focus = BlockFocus::Debug;
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
     async fn handle_key_input(&mut self, key_event: KeyEvent) -> Option<Event> {
         let mut event = None;
         // let ctrl = key_event.modifiers.contains(KeyModifiers::CONTROL);
@@ -529,18 +591,23 @@ impl AppState<'_> {
             return event;
         }
 
+        if self.handle_debug_toggle(&key_event) {
+            return event;
+        }
+
         // Handle prompt events
         event = match self.block_focus {
             BlockFocus::List => match self.route {
                 Route::EntryList => handle_active_entry_list(self, &key_event),
                 Route::DirectoryList => None,
-                Route::Help => None,
+                _ => None,
             },
             BlockFocus::Prompt => match self.prompt {
                 PromptState::Search(_) => handle_prompt_search(self, &key_event),
                 PromptState::Input => todo!("handle prompt input"),
                 _ => None,
             },
+            BlockFocus::Debug => handle_active_debug(self, &key_event),
         };
 
         // event = match self.route {
@@ -696,6 +763,16 @@ impl AppState<'_> {
         }
     }
 
+    fn build_debug(&self, height: u16) -> Paragraph {
+        let content = format!("{:#?}", self)
+            .lines()
+            .skip(self.debug.scroll_offset)
+            .take(height as usize - 2)
+            .collect::<Vec<_>>()
+            .join("\n");
+        Paragraph::new(content).block(Block::default().borders(Borders::all()).title("Debug"))
+    }
+
     fn render_page(&mut self, frame: &mut Frame) {
         let layout = Layout::new(
             Direction::Vertical,
@@ -717,6 +794,12 @@ impl AppState<'_> {
         }
         frame.render_widget(self.build_prompt(), prompt_l);
         self.set_prompt_cursor(frame, prompt_l);
+
+        if self.debug.show {
+            let rect = build_modal_block(frame.area());
+            let debug = self.build_debug(rect.height);
+            frame.render_widget(debug, rect);
+        }
     }
 
     fn set_prompt_cursor(&self, frame: &mut Frame, rect: Rect) {
@@ -735,6 +818,30 @@ impl AppState<'_> {
         }
     }
 }
+
+fn build_modal_block(rect: Rect) -> Rect {
+    let vertical = Layout::new(
+        Direction::Vertical,
+        [
+            Constraint::Percentage(10),
+            Constraint::Percentage(80),
+            Constraint::Percentage(10),
+        ],
+    );
+    let [_, main, _] = vertical.areas(rect);
+    let horizontal = Layout::new(
+        Direction::Horizontal,
+        [
+            Constraint::Percentage(10),
+            Constraint::Percentage(80),
+            Constraint::Percentage(10),
+        ],
+    );
+    let [_, block, _] = horizontal.areas(main);
+    block
+}
+
+// fn build_help_modal() {}
 
 fn ev_key_press(ev: &CrosstermEvent) -> Option<&KeyEvent> {
     match ev {
@@ -783,6 +890,11 @@ pub async fn run(_settings: &Settings, db: &Database, context: &Context) -> Resu
         block_focus: BlockFocus::List,
         database: db,
         status: RunningState::Active,
+        debug: Debug {
+            show: false,
+            return_focus: None,
+            scroll_offset: 0,
+        },
     };
     let mut event_manager = EventManager {
         crossterm: EventStream::new(),
