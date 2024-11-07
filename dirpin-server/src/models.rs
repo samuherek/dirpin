@@ -18,3 +18,16 @@ pub struct DbPin {
     pub version: u32,
     pub data: String,
 }
+
+#[derive(Debug)]
+pub struct NewUser {
+    pub username: String,
+    pub email: String,
+    pub password: String,
+}
+
+#[derive(Debug)]
+pub struct NewSession {
+    pub user_id: u32,
+    pub token: String,
+}

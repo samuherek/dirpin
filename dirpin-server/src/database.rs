@@ -1,4 +1,4 @@
-use crate::models::{DbPin, NewPin};
+use crate::models::{DbPin, NewPin, NewSession, NewUser};
 use eyre::Result;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow};
 use sqlx::{Row, SqlitePool};
@@ -95,6 +95,40 @@ impl Database {
         }
 
         tx.commit().await?;
+
+        Ok(())
+    }
+
+    pub async fn add_user(&self, user: NewUser) -> Result<u32> {
+        let created_at = OffsetDateTime::now_utc().to_string();
+        let res: (u32,) = sqlx::query_as(
+            r#"
+            insert into users(username, email, password, created_at)
+            values(?1, ?2, ?3, ?4)
+            returning id
+            "#,
+        )
+        .bind(user.username)
+        .bind(user.email)
+        .bind(user.password)
+        .bind(created_at)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(res.0)
+    }
+
+    pub async fn add_session(&self, session: NewSession) -> Result<()> {
+        sqlx::query(
+            r#"
+            insert into sessions(user_id, token)
+            values(?1, ?2)
+            "#,
+        )
+        .bind(session.user_id)
+        .bind(session.token)
+        .execute(&self.pool)
+        .await?;
 
         Ok(())
     }

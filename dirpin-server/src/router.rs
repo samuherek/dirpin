@@ -19,7 +19,8 @@ pub fn router(database: Database) -> Router {
     let routes = Router::new()
         .route("/", get(handlers::index))
         .route("/sync", get(handlers::sync))
-        .route("/pins", post(handlers::add));
+        .route("/pins", post(handlers::add))
+        .route("/register", post(handlers::register));
 
     routes
         .fallback(not_found)

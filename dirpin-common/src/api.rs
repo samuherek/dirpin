@@ -26,3 +26,15 @@ pub struct AddPinRequest {
     pub version: u32,
     pub data: String,
 }
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct RegisterRequest {
+    pub username: String,
+    pub email: String,
+    pub password: String,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct RegisterResponse {
+    pub session: String,
+}

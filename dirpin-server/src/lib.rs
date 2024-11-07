@@ -9,6 +9,7 @@ mod database;
 mod handlers;
 mod router;
 mod models;
+mod authentication;
 pub mod settings;
 
 use database::Database;
