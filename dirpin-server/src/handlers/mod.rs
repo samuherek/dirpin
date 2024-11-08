@@ -5,8 +5,8 @@ use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json};
 use dirpin_common::api::{
-    AddPinRequest, HealthCheckResponse, RegisterRequest, RegisterResponse, SyncRequest,
-    SyncResponse,
+    AddPinRequest, HealthCheckResponse, LoginRequest, LoginResponse, RegisterRequest,
+    RegisterResponse, SyncRequest, SyncResponse,
 };
 use dirpin_common::utils::crypto_random_string;
 use tracing::error;
@@ -110,6 +110,10 @@ pub async fn register(
         .with_status(StatusCode::BAD_REQUEST));
     }
 
+    // TODO: try to get the user from the db based on the username to make sure that the user
+    // can not create a duplicate account. Or otherwise, the unique constraint will fail in the
+    // database query.
+
     let hashed_password = hash_password(&req.password).map_err(|_| {
         ErrorMessage::value("Failed to register user").with_status(StatusCode::BAD_REQUEST)
     })?;
@@ -142,4 +146,20 @@ pub async fn register(
         })?;
 
     Ok(Json(RegisterResponse { session: token }))
+}
+
+pub async fn login(
+    state: State<AppState>,
+    req: Json<LoginRequest>,
+) -> Result<LoginResponse, ResponseError<'static>> {
+    // 1. Try to get the user to see if it's worth going deeper
+    // 1. has the password with constant time -> zero2prod
+    //
+    // 2. try to find the user in the database
+    // 3. create/load? a session for the user and return it.
+    //
+    // 4. check if the user is verified already.
+    //
+
+    Ok(())
 }

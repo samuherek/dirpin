@@ -6,6 +6,7 @@ use crypto_secretbox::{Key, KeyInit, XSalsa20Poly1305};
 use eyre::{bail, ensure, eyre, Context, Result};
 use fs_err as fs;
 use std::io::Write;
+use std::path::Path;
 use std::path::PathBuf;
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
@@ -42,12 +43,16 @@ pub fn create_key(settings: &Settings) -> Result<Key> {
     Ok(key)
 }
 
+pub fn read_key<P: AsRef<Path>>(path: P) -> Result<Key> {
+    let key = fs_err::read_to_string(path).wrap_err("Failed to read key file")?;
+    decode_key(key)
+}
+
 pub fn load_key(settings: &Settings) -> Result<Key> {
     let path = settings.key_path.as_str();
 
     let key = if PathBuf::from(path).exists() {
-        let key = fs_err::read_to_string(path)?;
-        decode_key(key)?
+        read_key(path)?
     } else {
         create_key(settings)?
     };
@@ -68,7 +73,7 @@ fn encode_key(key: &Key) -> Result<String> {
     Ok(buf)
 }
 
-fn decode_key(key: String) -> Result<Key> {
+pub fn decode_key(key: String) -> Result<Key> {
     let buf = BASE64_STANDARD
         .decode(key.trim_end())
         .context("Failed to decode key from base64")?;

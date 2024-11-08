@@ -1,5 +1,6 @@
 use dirpin_common::api::{
-    AddPinRequest, HealthCheckResponse, RegisterRequest, RegisterResponse, SyncResponse,
+    AddPinRequest, HealthCheckResponse, LoginRequest, LoginResponse, RegisterRequest,
+    RegisterResponse, SyncResponse,
 };
 use eyre::{bail, Result};
 use reqwest::{Response, StatusCode};
@@ -71,6 +72,23 @@ pub async fn register(
         .await?;
     let res = handle_response_error(res).await?;
     let res = res.json::<RegisterResponse>().await?;
+
+    Ok(res)
+}
+
+// TODO: make sure the passwords are behind "secretbox"
+pub async fn login(address: &str, username: &str, password: &str) -> Result<LoginResponse> {
+    let url = format!("{address}/login");
+    let res = reqwest::Client::new()
+        .post(url)
+        .json(&LoginRequest {
+            username: username.into(),
+            password: password.into(),
+        })
+        .send()
+        .await?;
+    let res = handle_response_error(res).await?;
+    let res = res.json::<LoginResponse>().await?;
 
     Ok(res)
 }

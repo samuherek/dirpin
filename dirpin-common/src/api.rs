@@ -38,3 +38,14 @@ pub struct RegisterRequest {
 pub struct RegisterResponse {
     pub session: String,
 }
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct LoginRequest {
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct LoginResponse {
+    pub session: String,
+}
