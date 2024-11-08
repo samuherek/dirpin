@@ -1,5 +1,7 @@
+use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
 use std::io::{self, IsTerminal, Read};
 use std::path::PathBuf;
+use getrandom::getrandom;
 
 #[cfg(not(targt_os = "windows"))]
 pub fn root_dir() -> PathBuf {
@@ -86,7 +88,6 @@ pub fn read_pipe_value() -> Result<Option<String>, io::Error> {
         Ok(value)
     }
 }
-
 
 /// Generate N random bytes, using a cryptographically secure source
 pub fn crypto_random_bytes<const N: usize>() -> [u8; N] {

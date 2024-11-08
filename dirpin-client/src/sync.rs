@@ -15,7 +15,7 @@ async fn sync_download(
     db: &Database,
     key: &Key,
     from: OffsetDateTime,
-) -> Result<()> {
+) -> Result<usize> {
     let res = api_client::sync(&settings.server_address, from).await?;
 
     let local: HashMap<Uuid, Pin> = db
@@ -61,7 +61,7 @@ async fn sync_download(
         println!("conflicts: {conflict_buf:?}");
     }
 
-    Ok(())
+    Ok(update_buf.len())
 }
 
 async fn sync_upload(
@@ -69,7 +69,7 @@ async fn sync_upload(
     db: &Database,
     key: &Key,
     from: OffsetDateTime,
-) -> Result<()> {
+) -> Result<usize> {
     // TODO: Split this into pages so that we don't have massive payload.
     let items = db.after(from).await?;
     let mut buffer = vec![];
@@ -90,7 +90,7 @@ async fn sync_upload(
 
     api_client::post_pins(&settings.server_address, &buffer).await?;
 
-    Ok(())
+    Ok(buffer.len())
 }
 
 pub async fn sync(settings: &Settings, db: &Database, force: bool) -> Result<()> {
@@ -105,10 +105,10 @@ pub async fn sync(settings: &Settings, db: &Database, force: bool) -> Result<()>
     } else {
         from
     };
-    sync_download(settings, db, &key, from.clone()).await?;
-    sync_upload(settings, db, &key, from).await?;
+    let down_count = sync_download(settings, db, &key, from.clone()).await?;
+    let up_count = sync_upload(settings, db, &key, from).await?;
 
-    println!("Done sync");
+    println!("Sync done. {up_count} Uploaded / {down_count} Downloaded");
     Settings::save_last_sync()?;
     Ok(())
 }

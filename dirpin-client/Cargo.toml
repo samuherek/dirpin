@@ -28,4 +28,5 @@ sql-builder = { workspace = true }
 color-eyre = "0.6.3"
 ratatui = "0.29.0"
 crossterm = { version = "0.28.1", features = ["event-stream"] }
-futures-util = "0.3.31"
+futures-util = { workspace = true }
+rpassword = "7.3.1"

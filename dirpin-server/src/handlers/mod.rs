@@ -1,4 +1,4 @@
-use crate::authentication::{crypto_random_string, hash_password};
+use crate::authentication::hash_password;
 use crate::models::{NewPin, NewSession, NewUser};
 use crate::router::AppState;
 use axum::extract::{Query, State};
@@ -8,6 +8,7 @@ use dirpin_common::api::{
     AddPinRequest, HealthCheckResponse, RegisterRequest, RegisterResponse, SyncRequest,
     SyncResponse,
 };
+use dirpin_common::utils::crypto_random_string;
 use tracing::error;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");

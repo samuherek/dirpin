@@ -18,4 +18,4 @@ sqlx = { workspace = true }
 fs-err = { workspace = true }
 argon2 = { version = "0.5.3", features = ["std"] }
 base64 = { workspace = true }
-getrandom = "0.2.15"
+futures-util = { workspace = true }

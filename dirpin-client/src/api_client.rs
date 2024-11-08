@@ -1,4 +1,6 @@
-use dirpin_common::api::{AddPinRequest, HealthCheckResponse, SyncResponse};
+use dirpin_common::api::{
+    AddPinRequest, HealthCheckResponse, RegisterRequest, RegisterResponse, SyncResponse,
+};
 use eyre::{bail, Result};
 use reqwest::{Response, StatusCode};
 use time::format_description::well_known::Rfc3339;
@@ -46,4 +48,29 @@ pub async fn post_pins(address: &str, data: &[AddPinRequest]) -> Result<()> {
     handle_response_error(res).await?;
 
     Ok(())
+}
+
+pub async fn register(
+    address: &str,
+    username: &str,
+    email: &str,
+    password: &str,
+) -> Result<RegisterResponse> {
+    // TODO: check if the user already exists
+    // TODO: setup the headers with version
+
+    let url = format!("{address}/register");
+    let res = reqwest::Client::new()
+        .post(url)
+        .json(&RegisterRequest {
+            username: username.into(),
+            email: email.into(),
+            password: password.into(),
+        })
+        .send()
+        .await?;
+    let res = handle_response_error(res).await?;
+    let res = res.json::<RegisterResponse>().await?;
+
+    Ok(res)
 }

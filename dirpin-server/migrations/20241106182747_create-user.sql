@@ -4,7 +4,7 @@ create table if not exists users (
 	username text not null unique,          
 	email text not null unique,             
 	password text not null,
-    verified_at integer not null,
+    verified_at integer,
     created_at integer not null
 );
 
