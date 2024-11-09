@@ -22,6 +22,13 @@ impl Cmd {
     // TODO: make this into an encoded value that you can pass that will hold the username,
     // password and the key for easier login
     pub async fn run(self, settings: &Settings) -> Result<()> {
+        let session_path = PathBuf::from(&settings.session_path);
+
+        if session_path.exists() {
+            println!("You are already logged in.");
+            return Ok(());
+        }
+
         // Try to get the username and password and the key
         let username = self.username.unwrap_or_else(|| read_input("username"));
         let password = self

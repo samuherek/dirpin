@@ -20,7 +20,6 @@ pub struct Settings {
     pub db_path: String,
     pub key_path: String,
     pub session_path: String,
-    pub host_path: String,
     pub server_address: String,
 }
 
@@ -77,14 +76,15 @@ impl Settings {
         let data_dir = dirpin_common::utils::data_dir();
         let db_path = data_dir.join("pins.db");
         let key_path = data_dir.join("key");
+        // TODO: make the sessions path and the host_id path consistent. They are kind of private
+        // for the local computer but at the same time it would be nice to have on the settings.
+        // However, we don't really want the user to overwrite it :|
         let session_path = data_dir.join("session");
-        let host_path = data_dir.join("hsot");
 
         Ok(Config::builder()
             .set_default("db_path", db_path.to_str())?
             .set_default("key_path", key_path.to_str())?
             .set_default("session_path", session_path.to_str())?
-            .set_default("host_path", host_path.to_str())?
             .set_default("server_address", "http://127.0.0.1:8090")?
             .add_source(
                 Environment::with_prefix("dirpin")
@@ -132,7 +132,6 @@ impl Settings {
         settings.db_path = expand_shell(&settings.db_path)?;
         settings.key_path = expand_shell(&settings.key_path)?;
         settings.session_path = expand_shell(&settings.session_path)?;
-        settings.host_path = expand_shell(&settings.host_path)?;
 
         Ok(settings)
     }

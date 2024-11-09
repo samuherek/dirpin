@@ -394,13 +394,14 @@ enum RunningState {
 }
 
 #[derive(Debug)]
-struct Debug {
+struct Debug<'a> {
     show: bool,
     return_focus: Option<BlockFocus>,
     scroll_offset: usize,
+    settings: &'a Settings,
 }
 
-impl Debug {
+impl<'a> Debug<'a> {
     fn move_down(&mut self, offset: usize) {
         self.scroll_offset += offset;
     }
@@ -418,7 +419,7 @@ struct AppState<'a> {
     block_focus: BlockFocus,
     database: &'a Database,
     status: RunningState,
-    debug: Debug,
+    debug: Debug<'a>,
 }
 
 impl<'a> std::fmt::Debug for AppState<'a> {
@@ -870,7 +871,7 @@ enum Focus {
     Help,
 }
 
-pub async fn run(_settings: &Settings, db: &Database, context: &Context) -> Result<()> {
+pub async fn run(settings: &Settings, db: &Database, context: &Context) -> Result<()> {
     tui::install_hooks()?;
     let mut terminal = tui::init()?;
     let (tx, rx) = mpsc::unbounded_channel();
@@ -894,6 +895,7 @@ pub async fn run(_settings: &Settings, db: &Database, context: &Context) -> Resu
             show: false,
             return_focus: None,
             scroll_offset: 0,
+            settings,
         },
     };
     let mut event_manager = EventManager {

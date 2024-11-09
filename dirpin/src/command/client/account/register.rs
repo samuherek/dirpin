@@ -19,6 +19,13 @@ pub struct Cmd {
 
 impl Cmd {
     pub async fn run(self, settings: &Settings) -> Result<()> {
+        let session_path = PathBuf::from(&settings.session_path);
+
+        if session_path.exists() {
+            println!("You are already logged in. To create a new account, please logout first.");
+            return Ok(());
+        }
+
         let username = self.username.unwrap_or_else(|| read_input("username"));
         let email = self.email.unwrap_or_else(|| read_input("email"));
         let password = self
@@ -35,7 +42,6 @@ impl Cmd {
         .await
         .wrap_err("Failed to register user")?;
 
-        let session_path = PathBuf::from(&settings.session_path);
         fs_err::write(session_path, res.session.as_bytes())
             .wrap_err("Failed to store session in file")?;
 
