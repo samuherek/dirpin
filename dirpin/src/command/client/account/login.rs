@@ -39,8 +39,9 @@ impl Cmd {
             // to create a new key. This is incase the user just accidentally presses enter while
             // logging in on a new computer.
             if key_path.exists() {
-                if encryption::read_key(&key_path).is_err() {
-                    bail!("Failed to read local key from file");
+                match encryption::read_key(&key_path) {
+                    Ok(_) => {}
+                    Err(_) => bail!("Failed to read local key from file"),
                 }
             } else {
                 println!("You have not provided a key and we could not find file key.");
@@ -54,10 +55,9 @@ impl Cmd {
             // compter with an existing account.
             if !key_path.exists() {
                 // You have provided a key and the key path does not exist
-                if encryption::decode_key(key.clone()).is_err() {
-                    bail!("Provided key seems to be invalid");
-                } else {
-                    fs_err::write(key_path, key)?;
+                match encryption::decode_key(key.clone()) {
+                    Ok(_) => fs_err::write(key_path, key).wrap_err("Failed to write key.")?,
+                    Err(_) => bail!("Provided key seems to be invalid"),
                 }
             } else {
                 // Make sure to compare the provided and the local key from the key file.
@@ -80,7 +80,9 @@ impl Cmd {
         // -
         let res = dirpin_client::api_client::login(
             settings.server_address.as_str(),
-            username.as_str(), password.as_str()
+            username.as_str(),
+            password.as_str(),
+            Settings::host_id().as_ref(),
         )
         .await?;
 

@@ -1,6 +1,6 @@
+use crate::domain::HostId;
 use config::builder::DefaultState;
 use config::{Config, ConfigBuilder, Environment, File as ConfigFile, FileFormat};
-use dirpin_common::domain::HostId;
 use eyre::{eyre, Context, Result};
 use std::fs::{create_dir_all, File};
 use std::io::Write;
@@ -13,11 +13,14 @@ const EXAMPLE_CONFIG: &str = include_str!("../config.toml");
 const HOST_ID_FILENAME: &str = "host_id";
 const LAST_SYNC_FILENAME: &str = "last_sync_time";
 
+// TODO: Research if storing the session and the key is ok in the
+// files in the conifg. Maybe we need to use the OS secret storage?
 #[derive(Debug, serde::Deserialize, serde::Serialize)]
 pub struct Settings {
     pub db_path: String,
     pub key_path: String,
     pub session_path: String,
+    pub host_path: String,
     pub server_address: String,
 }
 
@@ -63,8 +66,8 @@ impl Settings {
             let host_id = HostId::from_str(id.as_str()).expect("Failed to parse local host id");
             host_id
         } else {
-            let host_id = HostId::new();
-            Settings::save_to_data_dir(HOST_ID_FILENAME, host_id.to_string().as_ref())
+            let host_id = HostId::gen_host_id();
+            Settings::save_to_data_dir(HOST_ID_FILENAME, host_id.as_ref())
                 .expect("Failed to write local host id");
             host_id
         }
@@ -75,11 +78,13 @@ impl Settings {
         let db_path = data_dir.join("pins.db");
         let key_path = data_dir.join("key");
         let session_path = data_dir.join("session");
+        let host_path = data_dir.join("hsot");
 
         Ok(Config::builder()
             .set_default("db_path", db_path.to_str())?
             .set_default("key_path", key_path.to_str())?
             .set_default("session_path", session_path.to_str())?
+            .set_default("host_path", host_path.to_str())?
             .set_default("server_address", "http://127.0.0.1:8090")?
             .add_source(
                 Environment::with_prefix("dirpin")
@@ -124,18 +129,15 @@ impl Settings {
             .try_deserialize()
             .map_err(|e| eyre!("Failed to deserialize {}", e))?;
 
-        let db_path = settings.db_path;
-        let db_path = shellexpand::full(&db_path)?;
-        settings.db_path = db_path.to_string();
-
-        let key_path = settings.key_path;
-        let key_path = shellexpand::full(&key_path)?;
-        settings.key_path = key_path.to_string();
-
-        let session_path = settings.session_path;
-        let session_path = shellexpand::full(&session_path)?;
-        settings.session_path = session_path.to_string();
+        settings.db_path = expand_shell(&settings.db_path)?;
+        settings.key_path = expand_shell(&settings.key_path)?;
+        settings.session_path = expand_shell(&settings.session_path)?;
+        settings.host_path = expand_shell(&settings.host_path)?;
 
         Ok(settings)
     }
+}
+
+fn expand_shell(value: &str) -> Result<String> {
+    Ok(shellexpand::full(value)?.to_string())
 }

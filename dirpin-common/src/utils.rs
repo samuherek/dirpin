@@ -1,7 +1,7 @@
 use base64::prelude::{Engine, BASE64_URL_SAFE_NO_PAD};
+use getrandom::getrandom;
 use std::io::{self, IsTerminal, Read};
 use std::path::PathBuf;
-use getrandom::getrandom;
 
 #[cfg(not(targt_os = "windows"))]
 pub fn root_dir() -> PathBuf {

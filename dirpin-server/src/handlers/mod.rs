@@ -1,53 +1,92 @@
-use crate::authentication::hash_password;
-use crate::models::{NewPin, NewSession, NewUser};
+use crate::models::NewPin;
 use crate::router::AppState;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json};
-use dirpin_common::api::{
-    AddPinRequest, HealthCheckResponse, LoginRequest, LoginResponse, RegisterRequest,
-    RegisterResponse, SyncRequest, SyncResponse,
-};
-use dirpin_common::utils::crypto_random_string;
+use dirpin_common::api::{AddPinRequest, HealthCheckResponse, SyncRequest, SyncResponse};
 use tracing::error;
+
+pub mod user;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub struct ErrorMessage<'a> {
-    pub value: &'a str,
+// TODO figure out what interface to implement so that I can do "map_err(ServerError::Validation)
+#[derive(thiserror::Error, Debug)]
+pub enum ServerError {
+    #[error("Database error: {0}")]
+    DatabaseError(&'static str),
+
+    #[error("Not found: {0}")]
+    NotFound(&'static str),
+
+    #[error("Incorrect input: {0}")]
+    Validation(&'static str),
+
+    #[error("Invalid credentails")]
+    InvalidCredentials,
+
+    #[error("Unauthorized: {0}")]
+    Unauthorized(&'static str),
+
+    #[error("Unexpected error: {0}")]
+    UnexpectedError(&'static str),
 }
 
-pub struct ResponseError<'a> {
-    pub error: ErrorMessage<'a>,
-    pub status: StatusCode,
-}
-
-impl<'a> IntoResponse for ResponseError<'a> {
-    fn into_response(self) -> axum::response::Response {
-        (self.status, Json(self.error)).into_response()
-    }
-}
-
-pub trait ResponseErrExt<'a> {
-    fn with_status(self, status: StatusCode) -> ResponseError<'a>;
-    fn value(value: &'a str) -> Self;
-}
-
-impl<'a> ResponseErrExt<'a> for ErrorMessage<'a> {
-    fn with_status(self, status: StatusCode) -> ResponseError<'a> {
-        ResponseError {
-            error: self,
-            status,
+impl ServerError {
+    pub fn status_code(&self) -> StatusCode {
+        match self {
+            ServerError::NotFound(_) => StatusCode::NOT_FOUND,
+            ServerError::Validation(_) => StatusCode::BAD_REQUEST,
+            ServerError::InvalidCredentials => StatusCode::BAD_REQUEST,
+            ServerError::Unauthorized(_) => StatusCode::UNAUTHORIZED,
+            ServerError::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            ServerError::DatabaseError(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 
-    fn value(value: &'a str) -> Self {
-        ErrorMessage { value }
+    pub fn message(&self) -> String {
+        match self {
+            ServerError::NotFound(v) => v.to_string(),
+            ServerError::Validation(v) => v.to_string(),
+            ServerError::InvalidCredentials => "Invalid credentails".to_string(),
+            ServerError::Unauthorized(v) => v.to_string(),
+            ServerError::UnexpectedError(_) | ServerError::DatabaseError(_) => {
+                "An unexpected error occured. Please try agian later".into()
+            }
+        }
     }
 }
 
-pub async fn index() -> Result<Json<HealthCheckResponse>, ResponseError<'static>> {
+impl IntoResponse for ServerError {
+    fn into_response(self) -> axum::response::Response {
+        let status = self.status_code();
+        let value = self.message();
+
+        match self {
+            ServerError::Validation(_) => {}
+            ServerError::Unauthorized(_) => {}
+            ServerError::NotFound(_) => {}
+            e => {
+                error!("Error: {e:?}");
+            }
+        }
+
+        (
+            status,
+            Json(ErrorMessage {
+                value: value.clone(),
+            }),
+        )
+            .into_response()
+    }
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct ErrorMessage {
+    pub value: String,
+}
+
+pub async fn index() -> Result<Json<HealthCheckResponse>, ServerError> {
     let version = VERSION.to_string();
 
     Ok(Json(HealthCheckResponse {
@@ -60,10 +99,10 @@ pub async fn index() -> Result<Json<HealthCheckResponse>, ResponseError<'static>
 pub async fn sync(
     state: State<AppState>,
     _params: Query<SyncRequest>,
-) -> Result<Json<SyncResponse>, ResponseError<'static>> {
+) -> Result<Json<SyncResponse>, ServerError> {
     let res = state.database.list_pins().await.map_err(|err| {
-        error!("failed querying entries {err}");
-        ErrorMessage::value("Server error").with_status(StatusCode::INTERNAL_SERVER_ERROR)
+        error!("Failed to list entries {err}");
+        ServerError::DatabaseError("list entries")
     })?;
 
     Ok(Json(SyncResponse {
@@ -75,7 +114,7 @@ pub async fn sync(
 pub async fn add(
     state: State<AppState>,
     Json(req): Json<Vec<AddPinRequest>>,
-) -> Result<impl IntoResponse, ResponseError<'static>> {
+) -> Result<impl IntoResponse, ServerError> {
     let pins = req
         .into_iter()
         .map(|x| NewPin {
@@ -87,79 +126,10 @@ pub async fn add(
         })
         .collect::<Vec<_>>();
 
-    state.database.add_pins(&pins).await.map_err(|e| {
-        error!("failed adding entries {e}");
-        ErrorMessage::value("Server error").with_status(StatusCode::INTERNAL_SERVER_ERROR)
+    state.database.add_pins(&pins).await.map_err(|err| {
+        error!("Failed to add entries {err}");
+        ServerError::DatabaseError("add entries")
     })?;
 
     Ok(StatusCode::OK)
-}
-
-pub async fn register(
-    state: State<AppState>,
-    Json(req): Json<RegisterRequest>,
-) -> Result<Json<RegisterResponse>, ResponseError<'static>> {
-    if !req
-        .username
-        .chars()
-        .all(|x| x.is_ascii_alphanumeric() || x == '-' || x == '_')
-    {
-        return Err(ErrorMessage::value(
-            "Only alphanumeric, hypens and underscrores are allwoed in username",
-        )
-        .with_status(StatusCode::BAD_REQUEST));
-    }
-
-    // TODO: try to get the user from the db based on the username to make sure that the user
-    // can not create a duplicate account. Or otherwise, the unique constraint will fail in the
-    // database query.
-
-    let hashed_password = hash_password(&req.password).map_err(|_| {
-        ErrorMessage::value("Failed to register user").with_status(StatusCode::BAD_REQUEST)
-    })?;
-
-    let new_user = NewUser {
-        email: req.email,
-        username: req.username,
-        password: hashed_password,
-    };
-    let user_id = state.database.add_user(new_user).await.map_err(|err| {
-        error!("failed saving user {err}");
-        ErrorMessage::value("Failed to register user").with_status(StatusCode::BAD_REQUEST)
-    })?;
-
-    let token = crypto_random_string::<24>();
-    let new_session = NewSession {
-        user_id,
-        token: (&token).into(),
-    };
-
-    // TODO:: verification step
-    // TODO:: add created_at timestamp so we can have an expiration time on the session
-    state
-        .database
-        .add_session(new_session)
-        .await
-        .map_err(|err| {
-            error!("failed creating session {err}");
-            ErrorMessage::value("Failed to register user").with_status(StatusCode::BAD_REQUEST)
-        })?;
-
-    Ok(Json(RegisterResponse { session: token }))
-}
-
-pub async fn login(
-    state: State<AppState>,
-    req: Json<LoginRequest>,
-) -> Result<LoginResponse, ResponseError<'static>> {
-    // 1. Try to get the user to see if it's worth going deeper
-    // 1. has the password with constant time -> zero2prod
-    //
-    // 2. try to find the user in the database
-    // 3. create/load? a session for the user and return it.
-    //
-    // 4. check if the user is verified already.
-    //
-
-    Ok(())
 }

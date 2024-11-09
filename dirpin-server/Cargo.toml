@@ -19,3 +19,4 @@ fs-err = { workspace = true }
 argon2 = { version = "0.5.3", features = ["std"] }
 base64 = { workspace = true }
 futures-util = { workspace = true }
+thiserror = "2.0.1"

@@ -19,25 +19,28 @@ pub struct Cmd {
 
 impl Cmd {
     pub async fn run(self, settings: &Settings) -> Result<()> {
-        // get the inputs or ask the user to type it in
         let username = self.username.unwrap_or_else(|| read_input("username"));
         let email = self.email.unwrap_or_else(|| read_input("email"));
         let password = self
             .password
             .unwrap_or_else(|| read_input_hidden("password"));
 
-        // use the dirpin-client to request the register and return session
-        let res = api_client::register(&settings.server_address, &username, &email, &password)
-            .await
-            .wrap_err("Failed to register user")?;
+        let res = api_client::register(
+            &settings.server_address,
+            &username,
+            &email,
+            &password,
+            Settings::host_id().as_ref(),
+        )
+        .await
+        .wrap_err("Failed to register user")?;
 
-        // save the session in the file
         let session_path = PathBuf::from(&settings.session_path);
         fs_err::write(session_path, res.session.as_bytes())
             .wrap_err("Failed to store session in file")?;
 
-        // make sure the "key" is loaded
-        let _key = encryption::load_key(settings)?;
+        // make sure the "key" is created right after login
+        encryption::load_key(settings)?;
 
         Ok(())
     }

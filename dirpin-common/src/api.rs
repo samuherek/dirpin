@@ -32,6 +32,7 @@ pub struct RegisterRequest {
     pub username: String,
     pub email: String,
     pub password: String,
+    pub host_id: String,
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -43,6 +44,7 @@ pub struct RegisterResponse {
 pub struct LoginRequest {
     pub username: String,
     pub password: String,
+    pub host_id: String,
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]

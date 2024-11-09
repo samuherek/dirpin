@@ -1,4 +1,4 @@
-use crate::models::{NewPin, NewSession, NewUser, Pin, User};
+use crate::models::{HostSession, NewPin, NewSession, NewUser, Pin, RenewSession, Session, User};
 use eyre::Result;
 use futures_util::TryStreamExt;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow};
@@ -11,6 +11,7 @@ use tracing::debug;
 
 pub struct DbEntry(pub Pin);
 pub struct DbUser(pub User);
+pub struct DbSession(pub Session);
 
 impl<'r> FromRow<'r, SqliteRow> for DbEntry {
     fn from_row(row: &'r SqliteRow) -> sqlx::Result<Self> {
@@ -40,6 +41,18 @@ impl<'r> FromRow<'r, SqliteRow> for DbUser {
     }
 }
 
+impl<'r> FromRow<'r, SqliteRow> for DbSession {
+    fn from_row(row: &'r SqliteRow) -> sqlx::Result<Self> {
+        Ok(Self(Session {
+            id: row.try_get("id")?,
+            user_id: row.try_get("user_id")?,
+            host_id: row.try_get("host_id").ok(),
+            token: row.try_get("token")?,
+            expires_at: row.try_get("expires_at")?,
+        }))
+    }
+}
+
 #[derive(Clone)]
 pub struct Database {
     pool: SqlitePool,
@@ -59,6 +72,14 @@ impl std::fmt::Display for DbError {
         write!(f, "{self:?}")
     }
 }
+
+impl std::error::Error for DbError {}
+//
+// impl From<DbError> for eyre::Report {
+//     fn from(value: DbError) -> Self {
+//         eyre::Report::new(value)
+//     }
+// }
 
 fn db_error(error: sqlx::Error) -> DbError {
     match error {
@@ -162,16 +183,67 @@ impl Database {
     pub async fn add_session(&self, session: NewSession) -> Result<(), DbError> {
         sqlx::query(
             r#"
-            insert into sessions(user_id, token)
-            values(?1, ?2)
+            insert into sessions(user_id, host_id, token, expires_at)
+            values(?1, ?2, ?3, ?4)
             "#,
         )
         .bind(session.user_id)
+        .bind(session.host_id)
         .bind(session.token)
+        .bind(session.expires_at.to_string())
         .execute(&self.pool)
         .await
         .map_err(db_error)
         .map(|_| ())
+    }
+
+    pub async fn get_host_session(&self, session: HostSession) -> Result<Option<Session>, DbError> {
+        sqlx::query_as(
+            r#"
+            select * from sessions 
+            where user_id = ?1 and host_id = ?2 and expires_at > datetime('now')
+        "#,
+        )
+        .bind(session.user_id)
+        .bind(session.host_id)
+        .fetch_optional(&self.pool)
+        .await
+        // TODO: here we don't have to cover all the database errors. Just the relevant one which
+        // is failure. Please review this and see how to go about making the errors a bit better
+        // for all the different queries.
+        .map_err(db_error)
+        .map(|x| x.map(|DbSession(session)| session))
+    }
+
+    pub async fn renew_session(&self, session: RenewSession) -> Result<(), DbError> {
+        sqlx::query(
+            r#"
+               update sessions  
+               set token = ?2, expires_at = ?3
+               where id = ?1
+            "#,
+        )
+        .bind(session.id)
+        .bind(session.token)
+        .bind(session.expires_at.to_string())
+        .execute(&self.pool)
+        .await
+        .map_err(db_error)
+        .map(|_| ())
+    }
+
+    pub async fn get_session(&self, token: &str) -> Result<Option<Session>, DbError> {
+        sqlx::query_as(
+            r#"
+            select * from sessions 
+            where token = ?1 and expires_at > datetime('now')
+        "#,
+        )
+        .bind(token)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(db_error)
+        .map(|x| x.map(|DbSession(session)| session))
     }
 
     pub async fn get_user(&self, username: &str) -> Result<User, DbError> {

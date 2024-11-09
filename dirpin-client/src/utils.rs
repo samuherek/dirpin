@@ -24,3 +24,4 @@ pub fn read_input_hidden(name: &'static str) -> String {
     println!("Please enter {name}:");
     rpassword::read_password().expect("Failed to read password input")
 }
+

@@ -56,6 +56,7 @@ pub async fn register(
     username: &str,
     email: &str,
     password: &str,
+    host_id: &str,
 ) -> Result<RegisterResponse> {
     // TODO: check if the user already exists
     // TODO: setup the headers with version
@@ -67,6 +68,7 @@ pub async fn register(
             username: username.into(),
             email: email.into(),
             password: password.into(),
+            host_id: host_id.into(),
         })
         .send()
         .await?;
@@ -77,13 +79,19 @@ pub async fn register(
 }
 
 // TODO: make sure the passwords are behind "secretbox"
-pub async fn login(address: &str, username: &str, password: &str) -> Result<LoginResponse> {
+pub async fn login(
+    address: &str,
+    username: &str,
+    password: &str,
+    host_id: &str,
+) -> Result<LoginResponse> {
     let url = format!("{address}/login");
     let res = reqwest::Client::new()
         .post(url)
         .json(&LoginRequest {
             username: username.into(),
             password: password.into(),
+            host_id: host_id.into(),
         })
         .send()
         .await?;
