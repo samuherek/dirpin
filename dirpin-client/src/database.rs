@@ -7,9 +7,9 @@ use sql_builder::{quote, SqlBuilder};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow};
 use sqlx::{FromRow, Row, SqlitePool};
 use std::path::Path;
+use std::str::FromStr;
 use time::OffsetDateTime;
 use tracing::debug;
-use std::str::FromStr;
 
 // timestamp/updated_at -> unix timestamp with nanoseconds for precision
 // expires_at/created_at/deleted_at -> unix timestamp
@@ -117,13 +117,7 @@ impl Database {
     }
 
     async fn save_raw(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, v: &Entry) -> Result<()> {
-        let kind = v.kind.as_str();
-        let created_at = v.created_at.unix_timestamp();
-        let updated_at = v.updated_at.unix_timestamp_nanos() as i64;
-        let deleted_at = v.deleted_at.map(|x| x.unix_timestamp());
-
-        // TODO: Think about using the query! for static checks
-        sqlx::query!(
+        sqlx::query(
             r#"
             insert into entries(
                 id, value, data, kind, hostname, cwd, cgd, created_at, updated_at, deleted_at, version
@@ -142,18 +136,18 @@ impl Database {
                 deleted_at = ?10,
                 version = ?11
             "#,
-            v.id, 
-            v.value, 
-            v.data, 
-            kind,
-            v.hostname, 
-            v.cwd, 
-            v.cgd, 
-            created_at,
-            updated_at,
-            deleted_at,
-            v.version
         )
+            .bind(v.id)
+            .bind(v.value.as_str())
+            .bind(v.data.to_owned())
+            .bind(v.kind.as_str())
+            .bind(v.hostname.as_str())
+            .bind(v.cwd.as_str())
+            .bind(v.cgd.to_owned())
+            .bind(v.created_at.unix_timestamp())
+            .bind(v.updated_at.unix_timestamp_nanos() as i64)
+            .bind(v.deleted_at.map(|x| x.unix_timestamp()))
+            .bind(v.version)
         .execute(&mut **tx)
         .await?;
 
@@ -183,7 +177,7 @@ impl Database {
 
     pub async fn after(&self, timestamp: OffsetDateTime) -> Result<Vec<Entry>> {
         debug!("Query entries before from datbase");
-        let res = sqlx::query_as("select * from pins where updated_at > ?1")
+        let res = sqlx::query_as("select * from entries where updated_at > ?1")
             .bind(timestamp.unix_timestamp_nanos() as i64)
             .fetch(&self.pool)
             .map_ok(|DbEntry(entry)| entry)

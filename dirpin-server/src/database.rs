@@ -83,12 +83,6 @@ impl std::fmt::Display for DbError {
 }
 
 impl std::error::Error for DbError {}
-//
-// impl From<DbError> for eyre::Report {
-//     fn from(value: DbError) -> Self {
-//         eyre::Report::new(value)
-//     }
-// }
 
 fn db_error(error: sqlx::Error) -> DbError {
     match error {
