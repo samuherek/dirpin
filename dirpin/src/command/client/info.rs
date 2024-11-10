@@ -15,14 +15,27 @@ pub fn run(settings: &Settings) {
     let mut config_file = config_dir.clone();
     config_file.push("config.toml");
 
-    let paths = format!(
-        "PATHS:\nconfig_path: {:?}\ndb_path: {:?}\nkey_path: {:?}\nsession_path: {:?}",
-        config_file, settings.db_path, settings.key_path, settings.session_path
-    );
     let vars = format!(
         "VARS:\nDIRPIN_CONFIG_DIR = {:?}",
         env_config_dir.unwrap_or("None".into())
     );
+    println!("{vars}\n");
 
-    println!("{vars}\n\n{paths}\n\nVersion: {VERSION}");
+    let mut paths = String::from("PATHS:\n");
+    paths.push_str(&format!("config_path: {config_file:?}\n"));
+    paths.push_str(&format!("db_path: {:?}\n", settings.db_path));
+    paths.push_str(&format!("key_path: {:?}\n", settings.key_path));
+    paths.push_str(&format!("session_path: {:?}", settings.session_path));
+    println!("{paths}\n");
+
+    println!("ACCOUNT: ");
+    println!("Host_id: {}", Settings::host_id());
+    println!("Hostname: {}", "TODO");
+    println!(
+        "Auth: {}",
+        settings.session().unwrap_or("Unauthenticated".into())
+    );
+
+    println!("");
+    println!("Version: {VERSION}");
 }

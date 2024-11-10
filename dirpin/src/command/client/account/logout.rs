@@ -1,19 +1,27 @@
+use dirpin_client::api_client::AuthClient;
 use dirpin_client::settings::Settings;
 use eyre::Result;
-use std::path::PathBuf;
 
 pub async fn run(settings: &Settings) -> Result<()> {
-    let session_path = PathBuf::from(&settings.session_path);
+    let session = settings.session();
 
-    if !session_path.exists() {
+    if session.is_none() {
         println!("You are not logged in.");
         return Ok(());
     }
 
-    // 1. check if session exists. Otherwise log that we are not logged in.
     // 2. api_client request logout.
-    // 3. remove session file.
-    // 4. Notify user that we are logged out.
+    let client = AuthClient::new(&settings.server_address, &session.unwrap())?;
+    let res = client.logout().await?;
 
+    if !res.ok {
+        println!("Remote server did not log out sessoin");
+    }
+
+    // 3. remove session file.
+    fs_err::remove_file(&settings.session_path)?;
+
+    // 4. Notify user that we are logged out.
+   println!("You are logged out!");
     Ok(())
 }

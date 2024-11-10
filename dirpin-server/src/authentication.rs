@@ -58,9 +58,9 @@ impl FromRequestParts<AppState> for UserSession {
             .get_session_user(token)
             .await
             .map_err(|err| match err {
-                DbError::NotFound => ServerError::NotFound("session not found"),
+                DbError::NotFound => ServerError::Unauthorized("session not found"),
                 DbError::Other(err) => {
-                    error!("database error {err}");
+                    error!("get_session_user: database error {err}");
                     ServerError::UnexpectedError("failed to get session")
                 }
             })?;

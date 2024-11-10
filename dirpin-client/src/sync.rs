@@ -1,4 +1,4 @@
-use crate::api_client;
+use crate::api_client::AuthClient;
 use crate::database::Database;
 use crate::domain::Pin;
 use crate::encryption::{decrypt, encrypt, load_key};
@@ -13,10 +13,13 @@ use uuid::Uuid;
 async fn sync_download(
     settings: &Settings,
     db: &Database,
+    session: &str,
     key: &Key,
     from: OffsetDateTime,
 ) -> Result<usize> {
-    let res = api_client::sync(&settings.server_address, from).await?;
+    let res = AuthClient::new(&settings.server_address, session)?
+        .sync(from)
+        .await?;
 
     let local: HashMap<Uuid, Pin> = db
         .after(from)
@@ -67,6 +70,7 @@ async fn sync_download(
 async fn sync_upload(
     settings: &Settings,
     db: &Database,
+    session: &str,
     key: &Key,
     from: OffsetDateTime,
 ) -> Result<usize> {
@@ -88,7 +92,9 @@ async fn sync_upload(
         buffer.push(p);
     }
 
-    api_client::post_pins(&settings.server_address, &buffer).await?;
+    AuthClient::new(&settings.server_address, session)?
+        .post_pins(&buffer)
+        .await?;
 
     Ok(buffer.len())
 }
@@ -100,13 +106,14 @@ pub async fn sync(settings: &Settings, db: &Database, force: bool) -> Result<()>
     // 4. Update last_sync_timestamp on successful sync.
     let from = Settings::last_sync()?;
     let key = load_key(settings)?;
+    let session = settings.session().unwrap();
     let from = if force {
         OffsetDateTime::UNIX_EPOCH
     } else {
         from
     };
-    let down_count = sync_download(settings, db, &key, from.clone()).await?;
-    let up_count = sync_upload(settings, db, &key, from).await?;
+    let down_count = sync_download(settings, db, &session, &key, from.clone()).await?;
+    let up_count = sync_upload(settings, db, &session, &key, from).await?;
 
     println!("Sync done. {up_count} Uploaded / {down_count} Downloaded");
     Settings::save_last_sync()?;

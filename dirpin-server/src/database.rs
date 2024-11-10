@@ -4,10 +4,19 @@ use futures_util::TryStreamExt;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow};
 use sqlx::FromRow;
 use sqlx::{Row, SqlitePool};
+use std::borrow::Borrow;
 use std::path::Path;
 use std::str::FromStr;
+use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use tracing::debug;
+
+fn rfc3339<T: Borrow<OffsetDateTime>>(value: T) -> String {
+    value
+        .borrow()
+        .format(&Rfc3339)
+        .expect("Failed to format offset date time")
+}
 
 pub struct DbEntry(pub Pin);
 pub struct DbUser(pub User);
@@ -36,7 +45,9 @@ impl<'r> FromRow<'r, SqliteRow> for DbUser {
             email: row.try_get("email")?,
             password: row.try_get("password")?,
             verified_at: row.try_get("verified_at")?,
-            created_at: row.try_get("created_at")?,
+            created_at: row.try_get("created_at").map(|value: &str| {
+                OffsetDateTime::parse(value, &Rfc3339).expect("Failed to parse database date")
+            })?,
         }))
     }
 }
@@ -48,7 +59,9 @@ impl<'r> FromRow<'r, SqliteRow> for DbSession {
             user_id: row.try_get("user_id")?,
             host_id: row.try_get("host_id").ok(),
             token: row.try_get("token")?,
-            expires_at: row.try_get("expires_at")?,
+            expires_at: row
+                .try_get("expires_at")
+                .map(|x: i64| OffsetDateTime::from_unix_timestamp(x).unwrap())?,
         }))
     }
 }
@@ -127,7 +140,6 @@ impl Database {
         let mut tx = self.pool.begin().await.map_err(db_error)?;
 
         for el in pins {
-            let created_at = OffsetDateTime::now_utc().to_string();
             sqlx::query(
                 r#"
                 insert into pins(
@@ -150,7 +162,7 @@ impl Database {
             .bind(el.timestamp.unix_timestamp_nanos() as i64)
             .bind(el.version)
             .bind(el.data.as_str())
-            .bind(created_at)
+            .bind(rfc3339(&OffsetDateTime::now_utc()))
             .execute(&mut *tx)
             .await
             .map_err(db_error)?;
@@ -162,7 +174,6 @@ impl Database {
     }
 
     pub async fn add_user(&self, user: NewUser) -> Result<u32, DbError> {
-        let created_at = OffsetDateTime::now_utc().to_string();
         sqlx::query_as(
             r#"
             insert into users(username, email, password, created_at)
@@ -173,7 +184,7 @@ impl Database {
         .bind(user.username)
         .bind(user.email)
         .bind(user.password)
-        .bind(created_at)
+        .bind(rfc3339(OffsetDateTime::now_utc()))
         .fetch_one(&self.pool)
         .await
         .map_err(db_error)
@@ -190,7 +201,7 @@ impl Database {
         .bind(session.user_id)
         .bind(session.host_id)
         .bind(session.token)
-        .bind(session.expires_at.to_string())
+        .bind(session.expires_at.unix_timestamp())
         .execute(&self.pool)
         .await
         .map_err(db_error)
@@ -201,7 +212,7 @@ impl Database {
         sqlx::query_as(
             r#"
             select * from sessions 
-            where user_id = ?1 and host_id = ?2 and expires_at > datetime('now')
+            where user_id = ?1 and host_id = ?2 and expires_at > strftime('%s', 'now')
         "#,
         )
         .bind(session.user_id)
@@ -225,7 +236,7 @@ impl Database {
         )
         .bind(session.id)
         .bind(session.token)
-        .bind(session.expires_at.to_string())
+        .bind(session.expires_at.unix_timestamp())
         .execute(&self.pool)
         .await
         .map_err(db_error)
@@ -236,7 +247,7 @@ impl Database {
         sqlx::query(
             r#"
                delete from sessions  
-               where token = ?1 and expires_at > datetime('now')
+               where token = ?1 and expires_at > strftime('%s', 'now')
             "#,
         )
         .bind(token)
@@ -250,7 +261,7 @@ impl Database {
         sqlx::query_as(
             r#"
             select * from sessions 
-            where token = ?1 and expires_at > datetime('now')
+            where token = ?1 and expires_at > strftime('%s', 'now')
         "#,
         )
         .bind(token)
@@ -263,8 +274,9 @@ impl Database {
     pub async fn get_session_user(&self, token: &str) -> Result<User, DbError> {
         sqlx::query_as(
             r#"
-            select * from sessions 
-            where token = ?1 and expires_at > datetime('now')
+            select * from users 
+            left join sessions on sessions.user_id = users.id
+            where sessions.token = ?1 and sessions.expires_at > strftime('%s', 'now')
         "#,
         )
         .bind(token)

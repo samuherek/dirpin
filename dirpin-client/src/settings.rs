@@ -72,6 +72,18 @@ impl Settings {
         }
     }
 
+    // TODO Make the String into a SessionToken
+    pub fn session(&self) -> Option<String> {
+        let path = PathBuf::from(&self.session_path);
+
+        if !path.exists() {
+            return None;
+        }
+
+        let value = fs_err::read_to_string(path);
+        value.ok()
+    }
+
     pub fn builder() -> Result<ConfigBuilder<DefaultState>> {
         let data_dir = dirpin_common::utils::data_dir();
         let db_path = data_dir.join("pins.db");

@@ -3,9 +3,64 @@ use dirpin_common::api::{
     RegisterRequest, RegisterResponse, SyncResponse,
 };
 use eyre::{bail, Result};
+use reqwest::header::{HeaderMap, AUTHORIZATION};
 use reqwest::{Response, StatusCode};
 use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
+
+pub struct AuthClient<'a> {
+    address: &'a str,
+    client: reqwest::Client,
+}
+
+impl<'a> AuthClient<'a> {
+    pub fn new(address: &'a str, session_token: &str) -> Result<Self> {
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, format!("Token {}", session_token).parse()?);
+        // TODO add user agents;
+        // TODO: add version header;
+        // TODO: connection timeout
+        // TODO: timeout
+
+        Ok(Self {
+            address,
+            client: reqwest::Client::builder()
+                // .user_agent()
+                .default_headers(headers)
+                .build()?,
+        })
+    }
+
+    pub async fn logout(&self) -> Result<LogoutResponse> {
+        let url = format!("{}/logout", self.address);
+        let res = self.client.get(url).send().await?;
+        let res = handle_response_error(res).await?;
+        let res = res.json::<LogoutResponse>().await?;
+
+        Ok(res)
+    }
+
+    pub async fn sync(&self, from: OffsetDateTime) -> Result<SyncResponse> {
+        let url = format!(
+            "{}/sync?last_sync_ts={}",
+            self.address,
+            urlencoding::encode(from.format(&Rfc3339)?.as_str())
+        );
+        let res = self.client.get(url).send().await?;
+        let res = handle_response_error(res).await?;
+        let res = res.json::<SyncResponse>().await?;
+
+        Ok(res)
+    }
+
+    pub async fn post_pins(&self, data: &[AddPinRequest]) -> Result<()> {
+        let url = format!("{}/pins", self.address);
+        let res = self.client.post(url).json(data).send().await?;
+        handle_response_error(res).await?;
+
+        Ok(())
+    }
+}
 
 async fn handle_response_error(res: Response) -> Result<Response> {
     let status = res.status();
@@ -29,26 +84,6 @@ pub async fn health_check(address: &str) -> Result<HealthCheckResponse> {
     let res = res.json::<HealthCheckResponse>().await?;
 
     Ok(res)
-}
-
-pub async fn sync(address: &str, from: OffsetDateTime) -> Result<SyncResponse> {
-    let url = format!(
-        "{address}/sync?last_sync_ts={}",
-        urlencoding::encode(from.format(&Rfc3339)?.as_str())
-    );
-    let res = reqwest::get(url).await?;
-    let res = handle_response_error(res).await?;
-    let res = res.json::<SyncResponse>().await?;
-
-    Ok(res)
-}
-
-pub async fn post_pins(address: &str, data: &[AddPinRequest]) -> Result<()> {
-    let url = format!("{address}/pins");
-    let res = reqwest::Client::new().post(url).json(data).send().await?;
-    handle_response_error(res).await?;
-
-    Ok(())
 }
 
 pub async fn register(
@@ -97,15 +132,6 @@ pub async fn login(
         .await?;
     let res = handle_response_error(res).await?;
     let res = res.json::<LoginResponse>().await?;
-
-    Ok(res)
-}
-
-pub async fn logout(address: &str) -> Result<LogoutResponse> {
-    let url = format!("{address}/logout");
-    let res = reqwest::get(url).await?;
-    let res = handle_response_error(res).await?;
-    let res = res.json::<LogoutResponse>().await?;
 
     Ok(res)
 }

@@ -70,6 +70,12 @@ impl AsRef<str> for HostId {
     }
 }
 
+impl std::fmt::Display for HostId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
 pub struct Pin {
     pub id: Uuid,
