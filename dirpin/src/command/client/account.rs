@@ -3,6 +3,7 @@ use dirpin_client::settings::Settings;
 use eyre::Result;
 
 mod login;
+mod logout;
 mod register;
 
 #[derive(Parser, Debug)]
@@ -23,7 +24,7 @@ impl Cmd {
         match self {
             Self::Register(cmd) => cmd.run(settings).await?,
             Self::Login(cmd) => cmd.run(settings).await?,
-            Self::Logout => todo!("Logout"),
+            Self::Logout => logout::run(settings).await?,
             Self::Delete => todo!("Delete"),
             Self::Verify => todo!("Verify"),
         }

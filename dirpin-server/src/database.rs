@@ -232,6 +232,20 @@ impl Database {
         .map(|_| ())
     }
 
+    pub async fn remove_session(&self, token: &str) -> Result<(), DbError> {
+        sqlx::query(
+            r#"
+               delete from sessions  
+               where token = ?1 and expires_at > datetime('now')
+            "#,
+        )
+        .bind(token)
+        .execute(&self.pool)
+        .await
+        .map_err(db_error)
+        .map(|_| ())
+    }
+
     pub async fn get_session(&self, token: &str) -> Result<Option<Session>, DbError> {
         sqlx::query_as(
             r#"
@@ -244,6 +258,20 @@ impl Database {
         .await
         .map_err(db_error)
         .map(|x| x.map(|DbSession(session)| session))
+    }
+
+    pub async fn get_session_user(&self, token: &str) -> Result<User, DbError> {
+        sqlx::query_as(
+            r#"
+            select * from sessions 
+            where token = ?1 and expires_at > datetime('now')
+        "#,
+        )
+        .bind(token)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(db_error)
+        .map(|DbUser(user)| user)
     }
 
     pub async fn get_user(&self, username: &str) -> Result<User, DbError> {

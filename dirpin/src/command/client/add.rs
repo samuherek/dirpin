@@ -34,7 +34,7 @@ impl Cmd {
         } else if let Some(value) = utils::read_pipe_value()? {
             value
         } else {
-            return bail!("No input provided. Please run '--help' to see instructions.");
+            bail!("No input provided. Please run '--help' to see instructions.");
         };
 
         let pin = Pin::new(input, context.hostname, context.cwd, context.cgd);

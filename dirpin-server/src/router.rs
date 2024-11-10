@@ -21,7 +21,8 @@ pub fn router(database: Database) -> Router {
         .route("/sync", get(handlers::sync))
         .route("/pins", post(handlers::add))
         .route("/register", post(handlers::user::register))
-        .route("/login", post(handlers::user::login));
+        .route("/login", post(handlers::user::login))
+        .route("/logout", get(handlers::user::logout));
 
     routes
         .fallback(not_found)

@@ -1,6 +1,6 @@
 use dirpin_common::api::{
-    AddPinRequest, HealthCheckResponse, LoginRequest, LoginResponse, RegisterRequest,
-    RegisterResponse, SyncResponse,
+    AddPinRequest, HealthCheckResponse, LoginRequest, LoginResponse, LogoutResponse,
+    RegisterRequest, RegisterResponse, SyncResponse,
 };
 use eyre::{bail, Result};
 use reqwest::{Response, StatusCode};
@@ -97,6 +97,15 @@ pub async fn login(
         .await?;
     let res = handle_response_error(res).await?;
     let res = res.json::<LoginResponse>().await?;
+
+    Ok(res)
+}
+
+pub async fn logout(address: &str) -> Result<LogoutResponse> {
+    let url = format!("{address}/logout");
+    let res = reqwest::get(url).await?;
+    let res = handle_response_error(res).await?;
+    let res = res.json::<LogoutResponse>().await?;
 
     Ok(res)
 }

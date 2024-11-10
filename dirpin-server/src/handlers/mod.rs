@@ -1,3 +1,4 @@
+use crate::authentication::UserSession;
 use crate::models::NewPin;
 use crate::router::AppState;
 use axum::extract::{Query, State};
@@ -15,6 +16,9 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub enum ServerError {
     #[error("Database error: {0}")]
     DatabaseError(&'static str),
+
+    #[error("Bad request: {0}")]
+    BadRequest(&'static str),
 
     #[error("Not found: {0}")]
     NotFound(&'static str),
@@ -37,6 +41,7 @@ impl ServerError {
         match self {
             ServerError::NotFound(_) => StatusCode::NOT_FOUND,
             ServerError::Validation(_) => StatusCode::BAD_REQUEST,
+            ServerError::BadRequest(_) => StatusCode::BAD_REQUEST,
             ServerError::InvalidCredentials => StatusCode::BAD_REQUEST,
             ServerError::Unauthorized(_) => StatusCode::UNAUTHORIZED,
             ServerError::UnexpectedError(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -48,6 +53,7 @@ impl ServerError {
         match self {
             ServerError::NotFound(v) => v.to_string(),
             ServerError::Validation(v) => v.to_string(),
+            ServerError::BadRequest(v) => v.to_string(),
             ServerError::InvalidCredentials => "Invalid credentails".to_string(),
             ServerError::Unauthorized(v) => v.to_string(),
             ServerError::UnexpectedError(_) | ServerError::DatabaseError(_) => {
@@ -97,6 +103,7 @@ pub async fn index() -> Result<Json<HealthCheckResponse>, ServerError> {
 
 // TODO: make a propert error response types
 pub async fn sync(
+    _session: UserSession,
     state: State<AppState>,
     _params: Query<SyncRequest>,
 ) -> Result<Json<SyncResponse>, ServerError> {
@@ -112,6 +119,7 @@ pub async fn sync(
 }
 
 pub async fn add(
+    _session: UserSession,
     state: State<AppState>,
     Json(req): Json<Vec<AddPinRequest>>,
 ) -> Result<impl IntoResponse, ServerError> {

@@ -1,11 +1,13 @@
-use crate::authentication::{hash_password, session_expires_at, validate_credentials};
+use crate::authentication::{hash_password, session_expires_at, validate_credentials, UserSession};
 use crate::database::DbError;
 use crate::handlers::ServerError;
 use crate::models::{HostSession, NewSession, NewUser, RenewSession};
 use crate::router::AppState;
 use axum::extract::State;
 use axum::response::Json;
-use dirpin_common::api::{LoginRequest, LoginResponse, RegisterRequest, RegisterResponse};
+use dirpin_common::api::{
+    LoginRequest, LoginResponse, LogoutResponse, RegisterRequest, RegisterResponse,
+};
 use dirpin_common::utils::crypto_random_string;
 use tracing::error;
 
@@ -119,4 +121,32 @@ pub async fn login(
     Ok(Json(LoginResponse {
         session: next_token,
     }))
+}
+
+pub async fn logout(
+    session: UserSession,
+    state: State<AppState>,
+) -> Result<Json<LogoutResponse>, ServerError> {
+    match state.database.get_session(session.token()).await {
+        Err(DbError::Other(err)) => {
+            error!("Database error: {err}");
+            return Err(ServerError::UnexpectedError("Database error"));
+        }
+        Ok(Some(s)) => Some(s),
+        // TODO: I really don't like this error handling. We need to split NOT FOUND from the
+        // database error.
+        _ => None,
+    }
+    .ok_or(ServerError::NotFound("session"))?;
+
+    state
+        .database
+        .remove_session(session.token())
+        .await
+        .map_err(|err| {
+            error!("Database error: {err}");
+            ServerError::UnexpectedError("Database error")
+        })?;
+
+    Ok(Json(LogoutResponse { ok: true }))
 }
