@@ -703,10 +703,10 @@ impl AppState<'_> {
                 if i == state.selected {
                     Line::from(vec![
                         Span::styled(" > ", Style::new().fg(SLATE.c500)),
-                        Span::styled(x.note.as_str(), Style::new().fg(SLATE.c500)),
+                        Span::styled(x.value.as_str(), Style::new().fg(SLATE.c500)),
                     ])
                 } else {
-                    Line::from(vec![Span::raw("   "), Span::raw(x.note.as_str())])
+                    Line::from(vec![Span::raw("   "), Span::raw(x.value.as_str())])
                 }
             })
             .collect::<Vec<_>>();

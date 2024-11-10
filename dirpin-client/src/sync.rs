@@ -93,7 +93,7 @@ async fn sync_upload(
     }
 
     AuthClient::new(&settings.server_address, session)?
-        .post_pins(&buffer)
+        .post_entries(&buffer)
         .await?;
 
     Ok(buffer.len())

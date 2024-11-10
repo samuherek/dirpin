@@ -86,7 +86,7 @@ impl Settings {
 
     pub fn builder() -> Result<ConfigBuilder<DefaultState>> {
         let data_dir = dirpin_common::utils::data_dir();
-        let db_path = data_dir.join("pins.db");
+        let db_path = data_dir.join("entries.db");
         let key_path = data_dir.join("key");
         // TODO: make the sessions path and the host_id path consistent. They are kind of private
         // for the local computer but at the same time it would be nice to have on the settings.

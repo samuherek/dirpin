@@ -1,7 +1,7 @@
 -- Add migration script here
 create table if not exists entries (
     id text primary key,
-    note text not null,             -- tag name of the entry, shown as title
+    value text not null,            -- name of the entry, shown as title
     data text,                      -- extra data for the entry. Makrdown, script, notes,...
     kind text not null,             -- enum of possible entry types
     hostname text not null,         -- readable hostname reference for a unique computer

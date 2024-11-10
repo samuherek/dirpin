@@ -99,7 +99,7 @@ pub fn encode_to_msgpack(entry: &Entry) -> Result<Vec<u8>> {
     encode::write_array_len(&mut output, ENTRY_FIELD_LEN)?;
 
     encode::write_str(&mut output, &entry.id.to_string())?;
-    encode::write_str(&mut output, &entry.note)?;
+    encode::write_str(&mut output, &entry.value)?;
     match &entry.data {
         Some(v) => encode::write_str(&mut output, &v)?,
         None => encode::write_nil(&mut output)?,
@@ -141,7 +141,7 @@ pub fn decode_from_msgpack(bytes: &[u8]) -> Result<Entry> {
 
     let bytes = bytes.remaining_slice();
     let (id, bytes) = decode::read_str_from_slice(bytes).map_err(rmp_error_report)?;
-    let (note, bytes) = decode::read_str_from_slice(bytes).map_err(rmp_error_report)?;
+    let (value, bytes) = decode::read_str_from_slice(bytes).map_err(rmp_error_report)?;
     let (data, bytes) = match decode::read_str_from_slice(bytes) {
         Ok((value, bytes)) => (Some(value), bytes),
         Err(DecodeStringError::TypeMismatch(Marker::Null)) => {
@@ -184,7 +184,7 @@ pub fn decode_from_msgpack(bytes: &[u8]) -> Result<Entry> {
 
     Ok(Entry {
         id: Uuid::parse_str(id)?,
-        note: note.to_owned(),
+        value: value.to_owned(),
         data: data.map(|x| x.to_string()),
         // TODO: do the serde_json::from_str() for the kind
         kind: EntryKind::Note,

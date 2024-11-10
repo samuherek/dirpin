@@ -13,11 +13,11 @@ pub struct Cmd {
 impl Cmd {
     pub(crate) async fn run(self, _settings: &Settings, db: &Database) -> Result<()> {
         let context = current_context();
-        let pins = db.list(&[FilterMode::Workspace], &context, "").await?;
+        let entries = db.list(&[FilterMode::Workspace], &context, "").await?;
 
-        for el in pins {
+        for el in entries {
             let (_, user) = el.hostname.split_once(":").unwrap();
-            println!("{}:: {}", user, el.note);
+            println!("{}:: {}", user, el.value);
         }
 
         Ok(())

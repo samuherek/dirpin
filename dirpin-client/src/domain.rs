@@ -76,24 +76,40 @@ impl std::fmt::Display for HostId {
     }
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone)]
 pub enum EntryKind {
     Note,
 }
 
-// impl FromStr for EntryKind {
-//     fn from_str(s: &str) -> Result<Self, Self::Err> {
-//         match s {
-//             "note" =>
-//         }
-//     }
-// }
+impl FromStr for EntryKind {
+    type Err = String;
 
-#[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "note" => Ok(Self::Note),
+            _ => Err("Unknown entry kind".to_string()),
+        }
+    }
+}
+
+impl EntryKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            EntryKind::Note => "note",
+        }
+    }
+}
+
+impl std::fmt::Display for EntryKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Entry {
     pub id: Uuid,
-    pub note: String,
+    pub value: String,
     pub data: Option<String>,
     pub kind: EntryKind,
     pub hostname: String,
@@ -106,13 +122,13 @@ pub struct Entry {
 }
 
 impl Entry {
-    pub fn new(note: String, hostname: String, cwd: String, cgd: Option<String>) -> Self {
+    pub fn new(value: String, hostname: String, cwd: String, cgd: Option<String>) -> Self {
         let id = Uuid::now_v7();
         let created_at = OffsetDateTime::now_utc();
         let updated_at = created_at.clone();
         Self {
             id,
-            note,
+            value,
             data: None,
             kind: EntryKind::Note,
             hostname,

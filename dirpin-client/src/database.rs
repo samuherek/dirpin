@@ -7,9 +7,9 @@ use sql_builder::{quote, SqlBuilder};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow};
 use sqlx::{FromRow, Row, SqlitePool};
 use std::path::Path;
-use std::str::FromStr;
 use time::OffsetDateTime;
 use tracing::debug;
+use std::str::FromStr;
 
 // timestamp/updated_at -> unix timestamp with nanoseconds for precision
 // expires_at/created_at/deleted_at -> unix timestamp
@@ -20,7 +20,7 @@ impl<'r> FromRow<'r, SqliteRow> for DbEntry {
     fn from_row(row: &'r SqliteRow) -> sqlx::Result<Self> {
         Ok(Self(Entry {
             id: row.try_get("id")?,
-            note: row.try_get("note")?,
+            value: row.try_get("value")?,
             data: row.try_get("data")?,
             // TODO: fix this deserialization with the serde_json
             kind: row.try_get("kind").map(|_x: &str| EntryKind::Note)?,
@@ -117,35 +117,43 @@ impl Database {
     }
 
     async fn save_raw(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, v: &Entry) -> Result<()> {
+        let kind = v.kind.as_str();
+        let created_at = v.created_at.unix_timestamp();
+        let updated_at = v.updated_at.unix_timestamp_nanos() as i64;
+        let deleted_at = v.deleted_at.map(|x| x.unix_timestamp());
+
         // TODO: Think about using the query! for static checks
-        sqlx::query(
+        sqlx::query!(
             r#"
-            insert into pins(
-                id, data, hostname, cwd, cgd, created_at, updated_at, deleted_at, version
+            insert into entries(
+                id, value, data, kind, hostname, cwd, cgd, created_at, updated_at, deleted_at, version
             ) values(
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11
             )
             on conflict(id) do update set
-                data = ?2,
-                hostname = ?3,
-                cwd = ?4,
-                cgd = ?5,
-                created_at = ?6,
-                updated_at = ?7,
-                deleted_at = ?8,
-                version = ?9
+                value = ?2,
+                data = ?3,
+                kind = ?4,
+                hostname = ?5,
+                cwd = ?6,
+                cgd = ?7,
+                created_at = ?8,
+                updated_at = ?9,
+                deleted_at = ?10,
+                version = ?11
             "#,
+            v.id, 
+            v.value, 
+            v.data, 
+            kind,
+            v.hostname, 
+            v.cwd, 
+            v.cgd, 
+            created_at,
+            updated_at,
+            deleted_at,
+            v.version
         )
-        .bind(v.id.to_string())
-        .bind(v.note.as_str())
-        .bind(v.data.as_ref())
-        .bind(v.hostname.as_str())
-        .bind(v.cwd.as_str())
-        .bind(v.cgd.as_ref().map(|x| x.as_str()))
-        .bind(v.created_at.unix_timestamp() as i64)
-        .bind(v.updated_at.unix_timestamp_nanos() as i64)
-        .bind(v.deleted_at.map(|x| x.unix_timestamp() as i64))
-        .bind(v.version)
         .execute(&mut **tx)
         .await?;
 
@@ -163,7 +171,7 @@ impl Database {
     }
 
     pub async fn save_bulk(&self, items: &[Entry]) -> Result<()> {
-        debug!("Saving pins in bulk to database");
+        debug!("Saving entries in bulk to database");
         let mut tx = self.pool.begin().await?;
         for el in items {
             Self::save_raw(&mut tx, &el).await?;
@@ -174,7 +182,7 @@ impl Database {
     }
 
     pub async fn after(&self, timestamp: OffsetDateTime) -> Result<Vec<Entry>> {
-        debug!("Query pins before from datbase");
+        debug!("Query entries before from datbase");
         let res = sqlx::query_as("select * from pins where updated_at > ?1")
             .bind(timestamp.unix_timestamp_nanos() as i64)
             .fetch(&self.pool)
@@ -191,7 +199,7 @@ impl Database {
         context: &Context,
         search: &str,
     ) -> Result<Vec<Entry>> {
-        let mut query = SqlBuilder::select_from("pins");
+        let mut query = SqlBuilder::select_from("entries");
         query.field("*").order_desc("updated_at");
         for filter in filters {
             match filter {

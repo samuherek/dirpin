@@ -53,8 +53,8 @@ impl<'a> AuthClient<'a> {
         Ok(res)
     }
 
-    pub async fn post_pins(&self, data: &[AddEntryRequest]) -> Result<()> {
-        let url = format!("{}/pins", self.address);
+    pub async fn post_entries(&self, data: &[AddEntryRequest]) -> Result<()> {
+        let url = format!("{}/entries", self.address);
         let res = self.client.post(url).json(data).send().await?;
         handle_response_error(res).await?;
 

@@ -123,7 +123,7 @@ pub async fn add(
     state: State<AppState>,
     Json(req): Json<Vec<AddEntryRequest>>,
 ) -> Result<impl IntoResponse, ServerError> {
-    let pins = req
+    let entries = req
         .into_iter()
         .map(|x| NewEntry {
             client_id: x.id,
@@ -134,7 +134,7 @@ pub async fn add(
         })
         .collect::<Vec<_>>();
 
-    state.database.add_entries(&pins).await.map_err(|err| {
+    state.database.add_entries(&entries).await.map_err(|err| {
         error!("Failed to add entries {err}");
         ServerError::DatabaseError("add entries")
     })?;

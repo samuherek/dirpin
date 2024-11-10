@@ -20,7 +20,7 @@ time = { version = "0.3.36", features = ["serde-human-readable"] }
 base64 = "0.22.1"
 tracing = "0.1" 
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-sqlx = { version = "0.8.2", features = ["sqlite", "time", "uuid", "runtime-tokio-rustls", "migrate"] }
+sqlx = { version = "0.8.2", features = ["sqlite", "time", "uuid", "runtime-tokio-rustls", "migrate", "macros"] }
 fs-err = "3.0.0"
 sql-builder = "3.1.1"
 futures-util = "0.3.31"
