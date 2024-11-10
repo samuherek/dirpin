@@ -1,5 +1,5 @@
 use crate::database::{Context, Database, FilterMode};
-use crate::domain::Pin;
+use crate::domain::Entry;
 use crate::settings::Settings;
 use crossterm::event::{
     Event as CrosstermEvent, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
@@ -328,7 +328,7 @@ impl<T> SelectableList for List<T> {
 
 #[derive(Debug)]
 struct EntryList {
-    list: List<Pin>,
+    list: List<Entry>,
     show_preview: bool,
     context: Context,
     filter_mode: FilterMode,
@@ -336,11 +336,11 @@ struct EntryList {
 }
 
 impl EntryList {
-    fn items(&self) -> &[Pin] {
+    fn items(&self) -> &[Entry] {
         &self.list.items
     }
 
-    fn set_data(&mut self, data: Vec<Pin>) {
+    fn set_data(&mut self, data: Vec<Entry>) {
         self.list.set_data(data);
     }
 
@@ -448,7 +448,7 @@ impl AppState<'_> {
         Ok(())
     }
 
-    async fn query_save(&self, item: &Pin) -> Result<()> {
+    async fn query_save(&self, item: &Entry) -> Result<()> {
         // self.database.save(item).await?;
 
         Ok(())
@@ -703,10 +703,10 @@ impl AppState<'_> {
                 if i == state.selected {
                     Line::from(vec![
                         Span::styled(" > ", Style::new().fg(SLATE.c500)),
-                        Span::styled(x.data.as_str(), Style::new().fg(SLATE.c500)),
+                        Span::styled(x.note.as_str(), Style::new().fg(SLATE.c500)),
                     ])
                 } else {
-                    Line::from(vec![Span::raw("   "), Span::raw(x.data.as_str())])
+                    Line::from(vec![Span::raw("   "), Span::raw(x.note.as_str())])
                 }
             })
             .collect::<Vec<_>>();

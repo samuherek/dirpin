@@ -1,5 +1,5 @@
 use dirpin_common::api::{
-    AddPinRequest, HealthCheckResponse, LoginRequest, LoginResponse, LogoutResponse,
+    AddEntryRequest, HealthCheckResponse, LoginRequest, LoginResponse, LogoutResponse,
     RegisterRequest, RegisterResponse, SyncResponse,
 };
 use eyre::{bail, Result};
@@ -53,7 +53,7 @@ impl<'a> AuthClient<'a> {
         Ok(res)
     }
 
-    pub async fn post_pins(&self, data: &[AddPinRequest]) -> Result<()> {
+    pub async fn post_pins(&self, data: &[AddEntryRequest]) -> Result<()> {
         let url = format!("{}/pins", self.address);
         let res = self.client.post(url).json(data).send().await?;
         handle_response_error(res).await?;

@@ -1,10 +1,10 @@
 use crate::api_client::AuthClient;
 use crate::database::Database;
-use crate::domain::Pin;
+use crate::domain::Entry;
 use crate::encryption::{decrypt, encrypt, load_key};
 use crate::settings::Settings;
 use crypto_secretbox::Key;
-use dirpin_common::api::AddPinRequest;
+use dirpin_common::api::AddEntryRequest;
 use eyre::Result;
 use std::collections::HashMap;
 use time::OffsetDateTime;
@@ -21,13 +21,13 @@ async fn sync_download(
         .sync(from)
         .await?;
 
-    let local: HashMap<Uuid, Pin> = db
+    let local: HashMap<Uuid, Entry> = db
         .after(from)
         .await?
         .into_iter()
         .map(|x| (x.id.clone(), x))
         .collect();
-    let remote: HashMap<Uuid, Pin> = res
+    let remote: HashMap<Uuid, Entry> = res
         .updated
         .iter()
         .map(|x| serde_json::from_str(x).expect("failed deserialize"))
@@ -35,8 +35,8 @@ async fn sync_download(
         .map(|x| (x.id.clone(), x))
         .collect();
 
-    let mut conflict_buf: Vec<Pin> = vec![];
-    let mut update_buf: Vec<Pin> = vec![];
+    let mut conflict_buf: Vec<Entry> = vec![];
+    let mut update_buf: Vec<Entry> = vec![];
 
     for (id, r) in remote {
         if let Some(l) = local.get(&id) {
@@ -83,7 +83,7 @@ async fn sync_upload(
         let data = encrypt(el, key)?;
         let data = serde_json::to_string(&data)?;
 
-        let p = AddPinRequest {
+        let p = AddEntryRequest {
             id: el.id.to_string(),
             timestamp: el.updated_at,
             version: el.version,

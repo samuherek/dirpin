@@ -17,7 +17,7 @@ impl Cmd {
 
         for el in pins {
             let (_, user) = el.hostname.split_once(":").unwrap();
-            println!("{}:: {}", user, el.data);
+            println!("{}:: {}", user, el.note);
         }
 
         Ok(())

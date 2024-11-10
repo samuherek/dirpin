@@ -77,9 +77,25 @@ impl std::fmt::Display for HostId {
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
-pub struct Pin {
+#[serde(rename_all = "snake_case")]
+pub enum EntryKind {
+    Note,
+}
+
+// impl FromStr for EntryKind {
+//     fn from_str(s: &str) -> Result<Self, Self::Err> {
+//         match s {
+//             "note" =>
+//         }
+//     }
+// }
+
+#[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
+pub struct Entry {
     pub id: Uuid,
-    pub data: String,
+    pub note: String,
+    pub data: Option<String>,
+    pub kind: EntryKind,
     pub hostname: String,
     pub cwd: String,
     pub cgd: Option<String>,
@@ -89,14 +105,16 @@ pub struct Pin {
     pub version: u32,
 }
 
-impl Pin {
-    pub fn new(data: String, hostname: String, cwd: String, cgd: Option<String>) -> Self {
+impl Entry {
+    pub fn new(note: String, hostname: String, cwd: String, cgd: Option<String>) -> Self {
         let id = Uuid::now_v7();
         let created_at = OffsetDateTime::now_utc();
         let updated_at = created_at.clone();
         Self {
             id,
-            data,
+            note,
+            data: None,
+            kind: EntryKind::Note,
             hostname,
             cwd,
             cgd,

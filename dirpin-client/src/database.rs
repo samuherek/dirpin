@@ -1,15 +1,45 @@
-use crate::domain::Pin;
+use crate::domain::{Entry, EntryKind};
 use crate::utils::get_host_user;
 use dirpin_common::utils;
 use eyre::Result;
+use futures_util::TryStreamExt;
 use sql_builder::{quote, SqlBuilder};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow};
-use sqlx::{Row, SqlitePool};
+use sqlx::{FromRow, Row, SqlitePool};
 use std::path::Path;
 use std::str::FromStr;
 use time::OffsetDateTime;
 use tracing::debug;
-use uuid::Uuid;
+
+// timestamp/updated_at -> unix timestamp with nanoseconds for precision
+// expires_at/created_at/deleted_at -> unix timestamp
+
+pub struct DbEntry(pub Entry);
+
+impl<'r> FromRow<'r, SqliteRow> for DbEntry {
+    fn from_row(row: &'r SqliteRow) -> sqlx::Result<Self> {
+        Ok(Self(Entry {
+            id: row.try_get("id")?,
+            note: row.try_get("note")?,
+            data: row.try_get("data")?,
+            // TODO: fix this deserialization with the serde_json
+            kind: row.try_get("kind").map(|_x: &str| EntryKind::Note)?,
+            hostname: row.try_get("hostname")?,
+            cwd: row.try_get("cwd")?,
+            cgd: row.try_get("cgd")?,
+            created_at: row
+                .try_get("created_at")
+                .map(|x: i64| OffsetDateTime::from_unix_timestamp(x).unwrap())?,
+            updated_at: row
+                .try_get("updated_at")
+                .map(|x: i64| OffsetDateTime::from_unix_timestamp_nanos(x as i128).unwrap())?,
+            deleted_at: row
+                .try_get("deleted_at")
+                .map(|x: Option<i64>| x.map(|y| OffsetDateTime::from_unix_timestamp(y).unwrap()))?,
+            version: row.try_get("version")?,
+        }))
+    }
+}
 
 #[derive(Debug, Clone)]
 pub enum FilterMode {
@@ -86,32 +116,7 @@ impl Database {
         Ok(())
     }
 
-    fn map_query_pins(row: SqliteRow) -> Pin {
-        let cgd: Option<String> = row.get("cgd");
-        let created_at =
-            OffsetDateTime::from_unix_timestamp_nanos(row.get::<i64, _>("created_at") as i128)
-                .unwrap();
-        let updated_at =
-            OffsetDateTime::from_unix_timestamp_nanos(row.get::<i64, _>("updated_at") as i128)
-                .unwrap();
-        let deleted_at: Option<i64> = row.get("deleted_at");
-        let deleted_at =
-            deleted_at.and_then(|x| OffsetDateTime::from_unix_timestamp_nanos(x as i128).ok());
-
-        Pin {
-            id: Uuid::parse_str(row.get("id")).unwrap(),
-            data: row.get("data"),
-            hostname: row.get("hostname"),
-            cwd: row.get("cwd"),
-            cgd,
-            created_at,
-            updated_at,
-            deleted_at,
-            version: row.get("version"),
-        }
-    }
-
-    async fn save_raw(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, v: &Pin) -> Result<()> {
+    async fn save_raw(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, v: &Entry) -> Result<()> {
         // TODO: Think about using the query! for static checks
         sqlx::query(
             r#"
@@ -132,13 +137,14 @@ impl Database {
             "#,
         )
         .bind(v.id.to_string())
-        .bind(v.data.as_str())
+        .bind(v.note.as_str())
+        .bind(v.data.as_ref())
         .bind(v.hostname.as_str())
         .bind(v.cwd.as_str())
         .bind(v.cgd.as_ref().map(|x| x.as_str()))
-        .bind(v.created_at.unix_timestamp_nanos() as i64)
+        .bind(v.created_at.unix_timestamp() as i64)
         .bind(v.updated_at.unix_timestamp_nanos() as i64)
-        .bind(v.deleted_at.map(|x| x.unix_timestamp_nanos() as i64))
+        .bind(v.deleted_at.map(|x| x.unix_timestamp() as i64))
         .bind(v.version)
         .execute(&mut **tx)
         .await?;
@@ -146,7 +152,7 @@ impl Database {
         Ok(())
     }
 
-    pub async fn save(&self, item: &Pin) -> Result<()> {
+    pub async fn save(&self, item: &Entry) -> Result<()> {
         debug!("Saving pin to database");
         let mut tx = self.pool.begin().await?;
         // TODO: if transaction fails, it does not throw error?
@@ -156,7 +162,7 @@ impl Database {
         Ok(())
     }
 
-    pub async fn save_bulk(&self, items: &[Pin]) -> Result<()> {
+    pub async fn save_bulk(&self, items: &[Entry]) -> Result<()> {
         debug!("Saving pins in bulk to database");
         let mut tx = self.pool.begin().await?;
         for el in items {
@@ -167,12 +173,13 @@ impl Database {
         Ok(())
     }
 
-    pub async fn after(&self, timestamp: OffsetDateTime) -> Result<Vec<Pin>> {
+    pub async fn after(&self, timestamp: OffsetDateTime) -> Result<Vec<Entry>> {
         debug!("Query pins before from datbase");
-        let res = sqlx::query("select * from pins where updated_at > ?1")
+        let res = sqlx::query_as("select * from pins where updated_at > ?1")
             .bind(timestamp.unix_timestamp_nanos() as i64)
-            .map(Self::map_query_pins)
-            .fetch_all(&self.pool)
+            .fetch(&self.pool)
+            .map_ok(|DbEntry(entry)| entry)
+            .try_collect()
             .await?;
 
         Ok(res)
@@ -183,7 +190,7 @@ impl Database {
         filters: &[FilterMode],
         context: &Context,
         search: &str,
-    ) -> Result<Vec<Pin>> {
+    ) -> Result<Vec<Entry>> {
         let mut query = SqlBuilder::select_from("pins");
         query.field("*").order_desc("updated_at");
         for filter in filters {
@@ -206,9 +213,10 @@ impl Database {
         }
 
         let query = query.sql().expect("Failed to parse query");
-        let res = sqlx::query(&query)
-            .map(Self::map_query_pins)
-            .fetch_all(&self.pool)
+        let res = sqlx::query_as(&query)
+            .fetch(&self.pool)
+            .map_ok(|DbEntry(entry)| entry)
+            .try_collect()
             .await?;
 
         Ok(res)

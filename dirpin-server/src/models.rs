@@ -1,7 +1,7 @@
 use time::OffsetDateTime;
 
 #[derive(Debug)]
-pub struct NewPin {
+pub struct NewEntry {
     pub client_id: String,
     pub user_id: i64,
     pub timestamp: OffsetDateTime,
@@ -10,7 +10,7 @@ pub struct NewPin {
 }
 
 #[derive(Debug)]
-pub struct Pin {
+pub struct Entry {
     pub id: u32,
     pub client_id: String,
     pub user_id: i64,

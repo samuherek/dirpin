@@ -1,4 +1,4 @@
-use crate::domain::Pin;
+use crate::domain::{Entry, EntryKind};
 use crate::settings::Settings;
 use base64::prelude::{Engine, BASE64_STANDARD};
 use crypto_secretbox::aead::{AeadCore, AeadInPlace, Nonce, OsRng};
@@ -15,13 +15,13 @@ use uuid::Uuid;
 // type Nonce = GenericArray<u8, U24>;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub struct EncryptedPin {
+pub struct EncryptedEntry {
     pub ciphertext: Vec<u8>,
     pub nonce: Nonce<XSalsa20Poly1305>,
 }
 
 #[derive(Debug)]
-pub struct DecryptedPin {}
+pub struct DecryptedEntry {}
 
 pub fn generate_encoded_key() -> Result<(Key, String)> {
     let key = XSalsa20Poly1305::generate_key(&mut OsRng);
@@ -90,24 +90,32 @@ pub fn decode_key(key: String) -> Result<Key> {
     Ok(key)
 }
 
-pub fn encode_to_msgpack(pin: &Pin) -> Result<Vec<u8>> {
+const ENTRY_FIELD_LEN: u32 = 11;
+
+pub fn encode_to_msgpack(entry: &Entry) -> Result<Vec<u8>> {
     use rmp::encode;
 
     let mut output = Vec::new();
-    encode::write_array_len(&mut output, 9)?;
+    encode::write_array_len(&mut output, ENTRY_FIELD_LEN)?;
 
-    encode::write_str(&mut output, &pin.id.to_string())?;
-    encode::write_str(&mut output, &pin.data)?;
-    encode::write_str(&mut output, &pin.hostname)?;
-    encode::write_str(&mut output, &pin.cwd)?;
-    match &pin.cgd {
+    encode::write_str(&mut output, &entry.id.to_string())?;
+    encode::write_str(&mut output, &entry.note)?;
+    match &entry.data {
         Some(v) => encode::write_str(&mut output, &v)?,
         None => encode::write_nil(&mut output)?,
     }
-    encode::write_str(&mut output, &pin.created_at.format(&Rfc3339)?)?;
-    encode::write_str(&mut output, &pin.updated_at.format(&Rfc3339)?)?;
-    encode::write_u32(&mut output, pin.version)?;
-    match pin.deleted_at {
+    // TODO: fix the kind stuff. Implement &to_str
+    encode::write_str(&mut output, &"note")?;
+    encode::write_str(&mut output, &entry.hostname)?;
+    encode::write_str(&mut output, &entry.cwd)?;
+    match &entry.cgd {
+        Some(v) => encode::write_str(&mut output, &v)?,
+        None => encode::write_nil(&mut output)?,
+    }
+    encode::write_str(&mut output, &entry.created_at.format(&Rfc3339)?)?;
+    encode::write_str(&mut output, &entry.updated_at.format(&Rfc3339)?)?;
+    encode::write_u32(&mut output, entry.version)?;
+    match entry.deleted_at {
         Some(v) => encode::write_str(&mut output, &v.format(&Rfc3339)?)?,
         None => encode::write_nil(&mut output)?,
     }
@@ -119,7 +127,7 @@ fn rmp_error_report<E: std::fmt::Debug>(err: E) -> eyre::Report {
     eyre!("{err:?}")
 }
 
-pub fn decode_from_msgpack(bytes: &[u8]) -> Result<Pin> {
+pub fn decode_from_msgpack(bytes: &[u8]) -> Result<Entry> {
     use rmp::decode;
     use rmp::decode::{Bytes, DecodeStringError};
     use rmp::Marker;
@@ -127,13 +135,23 @@ pub fn decode_from_msgpack(bytes: &[u8]) -> Result<Pin> {
     let mut bytes = Bytes::new(bytes);
     let len = decode::read_array_len(&mut bytes).map_err(rmp_error_report)?;
 
-    if len != 9 {
+    if len != ENTRY_FIELD_LEN {
         bail!("incorrectly formed decrypted pin object");
     }
 
     let bytes = bytes.remaining_slice();
     let (id, bytes) = decode::read_str_from_slice(bytes).map_err(rmp_error_report)?;
-    let (data, bytes) = decode::read_str_from_slice(bytes).map_err(rmp_error_report)?;
+    let (note, bytes) = decode::read_str_from_slice(bytes).map_err(rmp_error_report)?;
+    let (data, bytes) = match decode::read_str_from_slice(bytes) {
+        Ok((value, bytes)) => (Some(value), bytes),
+        Err(DecodeStringError::TypeMismatch(Marker::Null)) => {
+            let mut rest = bytes;
+            decode::read_nil(&mut rest).map_err(rmp_error_report)?;
+            (None, rest)
+        }
+        Err(e) => return Err(rmp_error_report(e)),
+    };
+    let (_kind, bytes) = decode::read_str_from_slice(bytes).map_err(rmp_error_report)?;
     let (hostname, bytes) = decode::read_str_from_slice(bytes).map_err(rmp_error_report)?;
     let (cwd, bytes) = decode::read_str_from_slice(bytes).map_err(rmp_error_report)?;
     let (cgd, bytes) = match decode::read_str_from_slice(bytes) {
@@ -164,9 +182,12 @@ pub fn decode_from_msgpack(bytes: &[u8]) -> Result<Pin> {
         bail!("found more bytes than expected. malformed")
     }
 
-    Ok(Pin {
+    Ok(Entry {
         id: Uuid::parse_str(id)?,
-        data: data.to_owned(),
+        note: note.to_owned(),
+        data: data.map(|x| x.to_string()),
+        // TODO: do the serde_json::from_str() for the kind
+        kind: EntryKind::Note,
         hostname: hostname.to_owned(),
         cwd: cwd.to_owned(),
         cgd: cgd.map(|x| x.to_owned()),
@@ -179,7 +200,7 @@ pub fn decode_from_msgpack(bytes: &[u8]) -> Result<Pin> {
     })
 }
 
-pub fn encrypt(pin: &Pin, key: &Key) -> Result<EncryptedPin> {
+pub fn encrypt(pin: &Entry, key: &Key) -> Result<EncryptedEntry> {
     let mut buf = encode_to_msgpack(pin)?;
 
     let nonce = XSalsa20Poly1305::generate_nonce(&mut OsRng);
@@ -187,13 +208,13 @@ pub fn encrypt(pin: &Pin, key: &Key) -> Result<EncryptedPin> {
         .encrypt_in_place(&nonce, &[], &mut buf)
         .map_err(|_| eyre!("Failed to encrypt data"))?;
 
-    Ok(EncryptedPin {
+    Ok(EncryptedEntry {
         ciphertext: buf,
         nonce,
     })
 }
 
-pub fn decrypt(encrypted_data: EncryptedPin, key: &Key) -> Result<Pin> {
+pub fn decrypt(encrypted_data: EncryptedEntry, key: &Key) -> Result<Entry> {
     let mut buf = encrypted_data.ciphertext;
     XSalsa20Poly1305::new(&key)
         .decrypt_in_place(&encrypted_data.nonce, &[], &mut buf)

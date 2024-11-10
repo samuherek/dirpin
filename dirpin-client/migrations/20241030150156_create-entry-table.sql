@@ -1,7 +1,9 @@
 -- Add migration script here
-create table if not exists pins (
+create table if not exists entries (
     id text primary key,
-    data text not null,
+    note text not null,             -- tag name of the entry, shown as title
+    data text,                      -- extra data for the entry. Makrdown, script, notes,...
+    kind text not null,             -- enum of possible entry types
     hostname text not null,         -- readable hostname reference for a unique computer
     cwd text not null,
     cgd text,                       -- current git directory
@@ -11,4 +13,4 @@ create table if not exists pins (
     version integer not null        -- sync version
 );
 
-create index if not exists idx_pins_updated_at on pins(updated_at);
+create index if not exists idx_entries_updated_at on entries(updated_at);

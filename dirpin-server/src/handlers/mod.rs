@@ -1,10 +1,10 @@
 use crate::authentication::UserSession;
-use crate::models::NewPin;
+use crate::models::NewEntry;
 use crate::router::AppState;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json};
-use dirpin_common::api::{AddPinRequest, HealthCheckResponse, SyncRequest, SyncResponse};
+use dirpin_common::api::{AddEntryRequest, HealthCheckResponse, SyncRequest, SyncResponse};
 use tracing::error;
 
 pub mod user;
@@ -107,7 +107,7 @@ pub async fn sync(
     state: State<AppState>,
     _params: Query<SyncRequest>,
 ) -> Result<Json<SyncResponse>, ServerError> {
-    let res = state.database.list_pins().await.map_err(|err| {
+    let res = state.database.list_entries().await.map_err(|err| {
         error!("Failed to list entries {err}");
         ServerError::DatabaseError("list entries")
     })?;
@@ -121,11 +121,11 @@ pub async fn sync(
 pub async fn add(
     _session: UserSession,
     state: State<AppState>,
-    Json(req): Json<Vec<AddPinRequest>>,
+    Json(req): Json<Vec<AddEntryRequest>>,
 ) -> Result<impl IntoResponse, ServerError> {
     let pins = req
         .into_iter()
-        .map(|x| NewPin {
+        .map(|x| NewEntry {
             client_id: x.id,
             user_id: 1,
             timestamp: x.timestamp,
@@ -134,7 +134,7 @@ pub async fn add(
         })
         .collect::<Vec<_>>();
 
-    state.database.add_pins(&pins).await.map_err(|err| {
+    state.database.add_entries(&pins).await.map_err(|err| {
         error!("Failed to add entries {err}");
         ServerError::DatabaseError("add entries")
     })?;

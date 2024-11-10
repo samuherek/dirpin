@@ -1,30 +1,26 @@
-use crate::models::{HostSession, NewPin, NewSession, NewUser, Pin, RenewSession, Session, User};
+use crate::models::{
+    Entry, HostSession, NewEntry, NewSession, NewUser, RenewSession, Session, User,
+};
 use eyre::Result;
 use futures_util::TryStreamExt;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow};
 use sqlx::FromRow;
 use sqlx::{Row, SqlitePool};
-use std::borrow::Borrow;
 use std::path::Path;
 use std::str::FromStr;
-use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use tracing::debug;
 
-fn rfc3339<T: Borrow<OffsetDateTime>>(value: T) -> String {
-    value
-        .borrow()
-        .format(&Rfc3339)
-        .expect("Failed to format offset date time")
-}
+// timestamp/updated_at -> unix timestamp with nanoseconds for precision
+// expires_at/created_at/deleted_at -> unix timestamp
 
-pub struct DbEntry(pub Pin);
+pub struct DbEntry(pub Entry);
 pub struct DbUser(pub User);
 pub struct DbSession(pub Session);
 
 impl<'r> FromRow<'r, SqliteRow> for DbEntry {
     fn from_row(row: &'r SqliteRow) -> sqlx::Result<Self> {
-        Ok(Self(Pin {
+        Ok(Self(Entry {
             id: row.try_get("id")?,
             client_id: row.try_get("client_id")?,
             user_id: row.try_get("user_id")?,
@@ -45,9 +41,9 @@ impl<'r> FromRow<'r, SqliteRow> for DbUser {
             email: row.try_get("email")?,
             password: row.try_get("password")?,
             verified_at: row.try_get("verified_at")?,
-            created_at: row.try_get("created_at").map(|value: &str| {
-                OffsetDateTime::parse(value, &Rfc3339).expect("Failed to parse database date")
-            })?,
+            created_at: row
+                .try_get("created_at")
+                .map(|x: i64| OffsetDateTime::from_unix_timestamp(x).unwrap())?,
         }))
     }
 }
@@ -127,8 +123,8 @@ impl Database {
         Ok(())
     }
 
-    pub async fn list_pins(&self) -> Result<Vec<Pin>, DbError> {
-        sqlx::query_as("select * from pins")
+    pub async fn list_entries(&self) -> Result<Vec<Entry>, DbError> {
+        sqlx::query_as("select * from entries")
             .fetch(&self.pool)
             .map_ok(|DbEntry(entry)| entry)
             .try_collect()
@@ -136,13 +132,13 @@ impl Database {
             .map_err(db_error)
     }
 
-    pub async fn add_pins(&self, pins: &[NewPin]) -> Result<(), DbError> {
+    pub async fn add_entries(&self, entries: &[NewEntry]) -> Result<(), DbError> {
         let mut tx = self.pool.begin().await.map_err(db_error)?;
 
-        for el in pins {
+        for el in entries {
             sqlx::query(
                 r#"
-                insert into pins(
+                insert into entries(
                     client_id, user_id, timestamp, version, data, created_at
                 ) 
                 values(
@@ -162,7 +158,7 @@ impl Database {
             .bind(el.timestamp.unix_timestamp_nanos() as i64)
             .bind(el.version)
             .bind(el.data.as_str())
-            .bind(rfc3339(&OffsetDateTime::now_utc()))
+            .bind(OffsetDateTime::now_utc().unix_timestamp())
             .execute(&mut *tx)
             .await
             .map_err(db_error)?;
@@ -184,7 +180,7 @@ impl Database {
         .bind(user.username)
         .bind(user.email)
         .bind(user.password)
-        .bind(rfc3339(OffsetDateTime::now_utc()))
+        .bind(OffsetDateTime::now_utc().unix_timestamp())
         .fetch_one(&self.pool)
         .await
         .map_err(db_error)

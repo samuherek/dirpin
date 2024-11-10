@@ -19,7 +19,7 @@ pub struct SyncResponse {
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub struct AddPinRequest {
+pub struct AddEntryRequest {
     pub id: String,
     #[serde(with = "time::serde::rfc3339")]
     pub timestamp: OffsetDateTime,

@@ -1,6 +1,6 @@
 use clap::Parser;
 use dirpin_client::database::{current_context, global_context, Database};
-use dirpin_client::domain::Pin;
+use dirpin_client::domain::Entry;
 use dirpin_client::settings::Settings;
 use dirpin_common::utils;
 use eyre::{bail, Context, Result};
@@ -37,10 +37,10 @@ impl Cmd {
             bail!("No input provided. Please run '--help' to see instructions.");
         };
 
-        let pin = Pin::new(input, context.hostname, context.cwd, context.cgd);
+        let pin = Entry::new(input, context.hostname, context.cwd, context.cgd);
         db.save(&pin).await?;
 
-        println!("Pin added");
+        println!("Entry added");
         Ok(())
     }
 }
