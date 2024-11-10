@@ -10,6 +10,7 @@ use std::path::Path;
 use std::str::FromStr;
 use time::OffsetDateTime;
 use tracing::debug;
+use uuid::Uuid;
 
 // timestamp/updated_at -> unix timestamp with nanoseconds for precision
 // expires_at/created_at/deleted_at -> unix timestamp
@@ -19,7 +20,7 @@ pub struct DbEntry(pub Entry);
 impl<'r> FromRow<'r, SqliteRow> for DbEntry {
     fn from_row(row: &'r SqliteRow) -> sqlx::Result<Self> {
         Ok(Self(Entry {
-            id: row.try_get("id")?,
+            id: row.try_get("id").map(|x: &str| Uuid::parse_str(x).unwrap())?,
             value: row.try_get("value")?,
             data: row.try_get("data")?,
             // TODO: fix this deserialization with the serde_json
@@ -137,7 +138,7 @@ impl Database {
                 version = ?11
             "#,
         )
-            .bind(v.id)
+            .bind(v.id.to_string())
             .bind(v.value.as_str())
             .bind(v.data.to_owned())
             .bind(v.kind.as_str())

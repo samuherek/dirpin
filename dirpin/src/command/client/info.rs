@@ -1,7 +1,21 @@
 use dirpin_client::settings::Settings;
 use std::path::PathBuf;
+use time::{Duration, OffsetDateTime};
 
 use crate::VERSION;
+
+fn naive_time_ago(timestamp: OffsetDateTime) -> String {
+    let now = OffsetDateTime::now_utc();
+    let duration = now - timestamp;
+
+    if duration < Duration::hours(1) {
+        format!("{} minutes ago", duration.whole_minutes())
+    } else if duration < Duration::days(1) {
+        format!("{} hours ago", duration.whole_hours())
+    } else {
+        format!("{} days ago", duration.whole_days())
+    }
+}
 
 pub fn run(settings: &Settings) {
     let env_config_dir = std::env::var("DIRPIN_CONFIG_DIR");
@@ -34,6 +48,12 @@ pub fn run(settings: &Settings) {
     println!(
         "Auth: {}",
         settings.session().unwrap_or("Unauthenticated".into())
+    );
+    println!(
+        "Last sync: {}",
+        Settings::last_sync()
+            .map(|x| naive_time_ago(x))
+            .unwrap_or("Unavailable".to_string())
     );
 
     println!("");

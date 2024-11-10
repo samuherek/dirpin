@@ -104,9 +104,16 @@ pub async fn sync(settings: &Settings, db: &Database, force: bool) -> Result<()>
     // 2. Apply changes locally, tracking any unsynced local modifications.
     // 3. Upload remaining local changes, ensuring full consistency.
     // 4. Update last_sync_timestamp on successful sync.
+    let session = settings.session();
+
+    if session.is_none() {
+        println!("Log in to use syncing!");
+        return Ok(());
+    }
+
     let from = Settings::last_sync()?;
     let key = load_key(settings)?;
-    let session = settings.session().unwrap();
+    let session = session.unwrap();
     let from = if force {
         OffsetDateTime::UNIX_EPOCH
     } else {

@@ -48,6 +48,8 @@ impl Cmd {
         // make sure the "key" is created right after login
         encryption::load_key(settings)?;
 
+        println!("You are registered! Next verify your account.");
+
         Ok(())
     }
 }
