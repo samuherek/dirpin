@@ -17,6 +17,8 @@ use uuid::Uuid;
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct EncryptedEntry {
     pub ciphertext: Vec<u8>,
+    pub key: Vec<u8>,
+    pub key_nonce: Nonce<XSalsa20Poly1305>,
     pub nonce: Nonce<XSalsa20Poly1305>,
 }
 
@@ -136,7 +138,7 @@ pub fn decode_from_msgpack(bytes: &[u8]) -> Result<Entry> {
     let len = decode::read_array_len(&mut bytes).map_err(rmp_error_report)?;
 
     if len != ENTRY_FIELD_LEN {
-        bail!("incorrectly formed decrypted pin object");
+        bail!("incorrectly formed decrypted entry object");
     }
 
     let bytes = bytes.remaining_slice();
@@ -200,27 +202,42 @@ pub fn decode_from_msgpack(bytes: &[u8]) -> Result<Entry> {
     })
 }
 
-pub fn encrypt(pin: &Entry, key: &Key) -> Result<EncryptedEntry> {
-    let mut buf = encode_to_msgpack(pin)?;
+pub fn encrypt(entry: &Entry, key: &Key) -> Result<EncryptedEntry> {
+    let mut entry_buf = encode_to_msgpack(entry)?;
 
-    let nonce = XSalsa20Poly1305::generate_nonce(&mut OsRng);
-    XSalsa20Poly1305::new(key)
-        .encrypt_in_place(&nonce, &[], &mut buf)
+    let one_time_key = XSalsa20Poly1305::generate_key(&mut OsRng);
+    let one_time_key_nonce = XSalsa20Poly1305::generate_nonce(&mut OsRng);
+    XSalsa20Poly1305::new(&one_time_key)
+        .encrypt_in_place(&one_time_key_nonce, &[], &mut entry_buf)
         .map_err(|_| eyre!("Failed to encrypt data"))?;
 
+    let mut encrypted_key = one_time_key.to_vec();
+    let primary_key_nonce = XSalsa20Poly1305::generate_nonce(&mut OsRng);
+    XSalsa20Poly1305::new(key)
+        .encrypt_in_place(&primary_key_nonce, &[], &mut encrypted_key)
+        .map_err(|_| eyre!("Failed to encrypt key"))?;
+
     Ok(EncryptedEntry {
-        ciphertext: buf,
-        nonce,
+        ciphertext: entry_buf,
+        key: encrypted_key,
+        key_nonce: one_time_key_nonce,
+        nonce: primary_key_nonce,
     })
 }
 
 pub fn decrypt(encrypted_data: EncryptedEntry, key: &Key) -> Result<Entry> {
-    let mut buf = encrypted_data.ciphertext;
+    let mut one_time_key = encrypted_data.key;
     XSalsa20Poly1305::new(&key)
-        .decrypt_in_place(&encrypted_data.nonce, &[], &mut buf)
+        .decrypt_in_place(&encrypted_data.nonce, &[], &mut one_time_key)
+        .map_err(|_| eyre!("Failed to decrypt data"))?;
+    let one_time_key = Key::from_slice(&one_time_key);
+
+    let mut entry = encrypted_data.ciphertext;
+    XSalsa20Poly1305::new(&one_time_key)
+        .decrypt_in_place(&encrypted_data.key_nonce, &[], &mut entry)
         .map_err(|_| eyre!("Failed to decrypt data"))?;
 
-    let pin = decode_from_msgpack(&buf)?;
+    let entry = decode_from_msgpack(&entry)?;
 
-    Ok(pin)
+    Ok(entry)
 }

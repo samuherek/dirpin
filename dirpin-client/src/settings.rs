@@ -91,6 +91,7 @@ impl Settings {
         // TODO: make the sessions path and the host_id path consistent. They are kind of private
         // for the local computer but at the same time it would be nice to have on the settings.
         // However, we don't really want the user to overwrite it :|
+        // We should be able to overwrite it for dev purpose for testing 
         let session_path = data_dir.join("session");
 
         Ok(Config::builder()
