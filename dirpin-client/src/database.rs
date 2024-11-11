@@ -178,6 +178,16 @@ impl Database {
         Ok(())
     }
 
+    pub async fn delete(&self, id: Uuid) -> Result<()> {
+        sqlx::query("update entries set deleted_at = ?2 where id = ?1")
+            .bind(id.to_string())
+            .bind(OffsetDateTime::now_utc().unix_timestamp())
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
     pub async fn after(&self, timestamp: OffsetDateTime) -> Result<Vec<Entry>> {
         debug!("Query entries before from datbase");
         let res = sqlx::query_as("select * from entries where updated_at > ?1")
@@ -198,6 +208,7 @@ impl Database {
     ) -> Result<Vec<Entry>> {
         let mut query = SqlBuilder::select_from("entries");
         query.field("*").order_desc("updated_at");
+        query.and_where_is_null("deleted_at");
         for filter in filters {
             match filter {
                 FilterMode::All => &mut query,
@@ -236,12 +247,13 @@ impl Database {
     ) -> Result<i64> {
         let mut query = SqlBuilder::select_from("entries");
         query.field("count(1)");
+        query.and_where_is_null("deleted_at");
         for filter in filters {
             match filter {
                 FilterMode::All => &mut query,
                 FilterMode::Directory => query.and_where_eq("cwd", quote(&context.cwd)),
                 FilterMode::Workspace => query.and_where_eq(
-                    "cwd",
+                    "cgd",
                     quote(
                         context
                             .cgd
