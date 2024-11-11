@@ -841,7 +841,7 @@ impl AppState<'_> {
 
         Paragraph::new(Line::from(vec![
             Span::styled(formatted, Style::new().fg(GRAY.c500)),
-            Span::raw(" "),
+            Span::raw("  "),
             Span::raw(context_target),
             Span::styled(
                 format!("  ({})", self.entry_list.context_len),
@@ -876,6 +876,7 @@ impl AppState<'_> {
                     }
                 };
                 Line::from(vec![
+                    Span::styled("[   note    ]  ", Style::new().fg(GRAY.c500)),
                     Span::raw(x.value.as_str()),
                     Span::styled(format!("  {}", context), Style::new().fg(GRAY.c500)),
                 ])
@@ -977,7 +978,8 @@ impl AppState<'_> {
 
         frame.render_widget(self.build_context(), context_l);
         frame.render_widget(
-            Paragraph::new(Line::raw("-".repeat(sapcer_l.width.into()))).style(Style::new().fg(GRAY.c500)),
+            Paragraph::new(Line::raw("-".repeat(sapcer_l.width.into())))
+                .style(Style::new().fg(GRAY.c500)),
             sapcer_l,
         );
         match self.route {
@@ -1050,20 +1052,12 @@ enum Event {
     KeyInput(KeyEvent),
     TerminalRepaint,
     TerminalTick,
-    Quit,
 }
 
 struct EventManager {
     crossterm: EventStream,
     events: mpsc::UnboundedReceiver<Event>,
     dispatch: mpsc::UnboundedSender<Event>,
-}
-
-enum Focus {
-    Preview,
-    Prompt,
-    List,
-    Help,
 }
 
 pub async fn run(settings: &Settings, db: &Database, context: &Context) -> Result<()> {
