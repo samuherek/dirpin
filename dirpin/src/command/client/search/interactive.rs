@@ -1,16 +1,18 @@
-use crate::database::{Context, Database, FilterMode};
-use crate::domain::Entry;
-use crate::settings::Settings;
+use crate::tui;
 use crossterm::event::{
     Event as CrosstermEvent, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
 };
 use crossterm::execute;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen};
+use dirpin_client::database::{Context, Database, FilterMode};
+use dirpin_client::domain::Entry;
+use dirpin_client::settings::Settings;
 use eyre::{Context as EyreContext, Result};
 use futures_util::stream::StreamExt;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Position, Rect};
 use ratatui::prelude::{Buffer, Widget};
 use ratatui::style::palette::tailwind::{GRAY, SLATE, YELLOW};
+use ratatui::style::Color;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, StatefulWidget};
@@ -24,56 +26,11 @@ use time::OffsetDateTime;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
 
-mod tui;
-
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const HELP: &str = r#"
     Help: This is the help seciton stuff;
 "#;
-
-fn handle_active_entry_list(state: &mut AppState, event: &KeyEvent) -> Option<Event> {
-    match event.code {
-        KeyCode::Char('j') => state.entry_list.list.move_down(),
-        KeyCode::Char('k') => state.entry_list.list.move_up(),
-        KeyCode::Char('f') => state.entry_list.cycle_context_mode(),
-        KeyCode::Char('/') => state.set_prompt_search(PromptSearch::builder()),
-        _ => {}
-    }
-
-    None
-}
-
-fn handle_active_debug(state: &mut AppState, event: &KeyEvent) -> Option<Event> {
-    match event.code {
-        KeyCode::Char('j') => state.debug.move_down(1),
-        KeyCode::Char('k') => state.debug.move_up(1),
-        _ => {}
-    }
-
-    None
-}
-
-fn handle_prompt_search(state: &mut AppState, event: &KeyEvent) -> Option<Event> {
-    match &mut state.prompt {
-        PromptState::Search(search) => match event.code {
-            KeyCode::Esc => state.handle_prompt_search_exit(),
-            KeyCode::Char(c) => {
-                search.input.insert(c);
-                state.handle_refetch_search();
-            }
-            KeyCode::Backspace => {
-                search.input.remove();
-                state.handle_refetch_search();
-            }
-            KeyCode::Enter => {}
-            _ => {}
-        },
-        _ => unreachable!("Function call from wrong context"),
-    }
-
-    None
-}
 
 #[derive(Default, Clone)]
 struct StatefullList {
@@ -160,6 +117,10 @@ impl PromptSearch {
     fn step(mut self, step: PromptSearchStep) -> Self {
         self.step = step;
         self
+    }
+
+    fn set_step(&mut self, step: PromptSearchStep) {
+        self.step = step;
     }
 
     fn cursor(mut self, show: bool) -> Self {
@@ -331,6 +292,7 @@ struct EntryList {
     list: List<Entry>,
     show_preview: bool,
     context: Context,
+    context_len: i64,
     filter_mode: FilterMode,
     refetch: bool,
 }
@@ -342,6 +304,10 @@ impl EntryList {
 
     fn set_data(&mut self, data: Vec<Entry>) {
         self.list.set_data(data);
+    }
+
+    fn set_count(&mut self, count: i64) {
+        self.context_len = count;
     }
 
     fn ask_refetch(&mut self) {
@@ -437,13 +403,18 @@ impl<'a> std::fmt::Debug for AppState<'a> {
 
 impl AppState<'_> {
     async fn query_entry_list(&mut self) -> Result<()> {
-        let filter_mode = self.entry_list.filter_mode.clone();
+        let filter_mode = [self.entry_list.filter_mode.clone()];
         let search = self.prompt.get_search_input().unwrap_or("");
         let data = self
             .database
-            .list(&[filter_mode], &self.entry_list.context, search)
+            .list(&filter_mode, &self.entry_list.context, search)
+            .await?;
+        let context_count = self
+            .database
+            .count(&filter_mode, &self.entry_list.context, search)
             .await?;
         self.entry_list.set_data(data);
+        self.entry_list.set_count(context_count as i64);
 
         Ok(())
     }
@@ -472,7 +443,8 @@ impl AppState<'_> {
 
     fn handle_prompt_search_exit(&mut self) {
         self.block_focus = BlockFocus::List;
-        self.prompt = PromptState::Default;
+        self.prompt.set(PromptState::Default);
+        self.handle_refetch_search();
     }
 
     fn handle_refetch_search(&mut self) {
@@ -585,7 +557,7 @@ impl AppState<'_> {
 
     async fn handle_key_input(&mut self, key_event: KeyEvent) -> Option<Event> {
         let mut event = None;
-        // let ctrl = key_event.modifiers.contains(KeyModifiers::CONTROL);
+        let ctrl = key_event.modifiers.contains(KeyModifiers::CONTROL);
 
         // Handle global exit
         if self.handle_global_exit(&key_event) {
@@ -599,16 +571,72 @@ impl AppState<'_> {
         // Handle prompt events
         event = match self.block_focus {
             BlockFocus::List => match self.route {
-                Route::EntryList => handle_active_entry_list(self, &key_event),
+                Route::EntryList => {
+                    match self.prompt {
+                        PromptState::Search(_) => match key_event.code {
+                            KeyCode::Esc => {
+                                self.handle_prompt_search_exit();
+                                return None;
+                            }
+                            _ => {}
+                        },
+                        _ => {}
+                    };
+
+                    match key_event.code {
+                        KeyCode::Char('j') => self.entry_list.list.move_down(),
+                        KeyCode::Char('k') => self.entry_list.list.move_up(),
+                        KeyCode::Char('f') if ctrl => self.entry_list.cycle_context_mode(),
+                        KeyCode::Char('/') => self.set_prompt_search(PromptSearch::builder()),
+                        _ => {}
+                    }
+
+                    None
+                }
                 Route::DirectoryList => None,
                 _ => None,
             },
-            BlockFocus::Prompt => match self.prompt {
-                PromptState::Search(_) => handle_prompt_search(self, &key_event),
+            BlockFocus::Prompt => match &mut self.prompt {
+                PromptState::Search(search) => match search.step {
+                    PromptSearchStep::Edit => match key_event.code {
+                        KeyCode::Char('f') if ctrl => {
+                            self.entry_list.cycle_context_mode();
+                            None
+                        }
+                        KeyCode::Char(c) => {
+                            search.input.insert(c);
+                            self.handle_refetch_search();
+                            None
+                        }
+                        KeyCode::Backspace => {
+                            search.input.remove();
+                            self.handle_refetch_search();
+                            None
+                        }
+                        KeyCode::Enter => {
+                            self.block_focus = BlockFocus::List;
+                            search.set_step(PromptSearchStep::Submit);
+                            None
+                        }
+                        KeyCode::Esc => {
+                            self.handle_prompt_search_exit();
+                            None
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                },
                 PromptState::Input => todo!("handle prompt input"),
                 _ => None,
             },
-            BlockFocus::Debug => handle_active_debug(self, &key_event),
+            BlockFocus::Debug => {
+                match key_event.code {
+                    KeyCode::Char('j') => self.debug.move_down(1),
+                    KeyCode::Char('k') => self.debug.move_up(1),
+                    _ => {}
+                }
+                None
+            }
         };
 
         // event = match self.route {
@@ -681,7 +709,11 @@ impl AppState<'_> {
         Paragraph::new(Line::from(vec![
             Span::styled(formatted, Style::new().fg(GRAY.c500)),
             Span::raw(" "),
-            Span::styled(context_target, Style::new().fg(SLATE.c500)),
+            Span::raw(context_target),
+            Span::styled(
+                format!("  ({})", self.entry_list.context_len),
+                Style::new().fg(GRAY.c500),
+            ),
         ]))
     }
 
@@ -698,16 +730,23 @@ impl AppState<'_> {
             .iter()
             .skip(state.offset)
             .take(height)
-            .enumerate()
-            .map(|(i, x)| {
-                if i == state.selected {
-                    Line::from(vec![
-                        Span::styled(" > ", Style::new().fg(SLATE.c500)),
-                        Span::styled(x.value.as_str(), Style::new().fg(SLATE.c500)),
-                    ])
-                } else {
-                    Line::from(vec![Span::raw("   "), Span::raw(x.value.as_str())])
-                }
+            .map(|x| {
+                let context = match self.entry_list.filter_mode {
+                    FilterMode::All => x
+                        .cgd
+                        .as_ref()
+                        .map(|x| x.split("/").last().unwrap())
+                        .unwrap_or(&x.cwd)
+                        .to_string(),
+                    FilterMode::Directory => "".to_string(),
+                    FilterMode::Workspace => {
+                        x.cwd.replace(&self.entry_list.context.cwd, "").to_string()
+                    }
+                };
+                Line::from(vec![
+                    Span::raw(x.value.as_str()),
+                    Span::styled(format!("  {}", context), Style::new().fg(GRAY.c500)),
+                ])
             })
             .collect::<Vec<_>>();
 
@@ -720,20 +759,38 @@ impl AppState<'_> {
                 rect,
             ),
             _ => {
-                let content = Paragraph::new(lines);
-
-                if self.entry_list.show_preview {
-                    let layout_main = Layout::new(
-                        Direction::Horizontal,
-                        vec![Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)],
-                    );
-                    let [list_l, preview_l] = layout_main.areas(rect);
-
-                    frame.render_widget(content, list_l);
-                    // frame.render_widget(preview, preview_l);
+                let constraints = if self.entry_list.show_preview {
+                    vec![Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)]
                 } else {
-                    frame.render_widget(content, rect);
+                    vec![Constraint::Min(1), Constraint::Max(0)]
+                };
+                let layout_main = Layout::new(Direction::Horizontal, constraints);
+                let [list_l, preview_l] = layout_main.areas(rect);
+
+                for (i, line) in lines.into_iter().enumerate() {
+                    let style = if self.entry_list.list.selected() == i {
+                        Style::new().bg(GRAY.c700)
+                    } else {
+                        Style::new()
+                    };
+
+                    let item_rect = Rect::new(list_l.x, list_l.y + i as u16, list_l.width, 1);
+                    let paragraph = Paragraph::new(line).style(style);
+                    frame.render_widget(paragraph, item_rect);
                 }
+
+                // if self.entry_list.show_preview {
+                //     let layout_main = Layout::new(
+                //         Direction::Horizontal,
+                //         vec![Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)],
+                //     );
+                //     let [list_l, preview_l] = layout_main.areas(rect);
+                //
+                //     frame.render_widget(content, list_l);
+                //     // frame.render_widget(preview, preview_l);
+                // } else {
+                //     frame.render_widget(content, rect);
+                // }
             }
         }
     }
@@ -771,21 +828,28 @@ impl AppState<'_> {
             .take(height as usize - 2)
             .collect::<Vec<_>>()
             .join("\n");
-        Paragraph::new(content).block(Block::default().borders(Borders::all()).title("Debug"))
+        Paragraph::new(content)
+            .block(Block::default().borders(Borders::all()).title("Debug"))
+            .style(Style::new().bg(GRAY.c900))
     }
 
     fn render_page(&mut self, frame: &mut Frame) {
         let layout = Layout::new(
             Direction::Vertical,
             vec![
-                Constraint::Length(2),
+                Constraint::Length(1),
+                Constraint::Length(1),
                 Constraint::Min(1),
                 Constraint::Length(1),
             ],
         );
-        let [context_l, main_l, prompt_l] = layout.areas(frame.area());
+        let [context_l, sapcer_l, main_l, prompt_l] = layout.areas(frame.area());
 
         frame.render_widget(self.build_context(), context_l);
+        frame.render_widget(
+            Paragraph::new(Line::raw("--------")).style(Style::new().fg(GRAY.c500)),
+            sapcer_l,
+        );
         match self.route {
             Route::EntryList => {
                 self.render_entry_list(frame, main_l);
@@ -881,7 +945,8 @@ pub async fn run(settings: &Settings, db: &Database, context: &Context) -> Resul
             list: List::new(Vec::new()),
             show_preview: false,
             context: context.clone(),
-            filter_mode: FilterMode::Workspace,
+            context_len: 0,
+            filter_mode: FilterMode::Directory,
             refetch: false,
         },
         directory_list: DirList {

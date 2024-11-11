@@ -737,13 +737,17 @@ name = "dirpin"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "color-eyre",
  "config",
+ "crossterm",
  "dirpin-client",
  "dirpin-common",
  "dirpin-server",
  "eyre",
  "fs-err",
+ "futures-util",
  "notify-rust",
+ "ratatui",
  "serde",
  "time",
  "tokio",
@@ -756,9 +760,7 @@ name = "dirpin-client"
 version = "0.1.0"
 dependencies = [
  "base64",
- "color-eyre",
  "config",
- "crossterm",
  "crypto_secretbox",
  "dirpin-common",
  "eyre",
@@ -766,7 +768,6 @@ dependencies = [
  "futures-util",
  "generic-array",
  "rand",
- "ratatui",
  "reqwest",
  "rmp",
  "rpassword",

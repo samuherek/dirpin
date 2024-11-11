@@ -5,4 +5,3 @@ pub mod encryption;
 pub mod settings;
 pub mod sync;
 pub mod utils;
-pub mod interactive;

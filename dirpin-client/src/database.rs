@@ -20,7 +20,9 @@ pub struct DbEntry(pub Entry);
 impl<'r> FromRow<'r, SqliteRow> for DbEntry {
     fn from_row(row: &'r SqliteRow) -> sqlx::Result<Self> {
         Ok(Self(Entry {
-            id: row.try_get("id").map(|x: &str| Uuid::parse_str(x).unwrap())?,
+            id: row
+                .try_get("id")
+                .map(|x: &str| Uuid::parse_str(x).unwrap())?,
             value: row.try_get("value")?,
             data: row.try_get("data")?,
             // TODO: fix this deserialization with the serde_json
@@ -201,7 +203,7 @@ impl Database {
                 FilterMode::All => &mut query,
                 FilterMode::Directory => query.and_where_eq("cwd", quote(&context.cwd)),
                 FilterMode::Workspace => query.and_where_eq(
-                    "cwd",
+                    "cgd",
                     quote(
                         context
                             .cgd
@@ -211,8 +213,9 @@ impl Database {
                 ),
             };
         }
+
         if !search.is_empty() {
-            query.and_where_like_any("data", search);
+            query.and_where_like_any("value", search);
         }
 
         let query = query.sql().expect("Failed to parse query");
@@ -223,5 +226,39 @@ impl Database {
             .await?;
 
         Ok(res)
+    }
+
+    pub async fn count(
+        &self,
+        filters: &[FilterMode],
+        context: &Context,
+        search: &str,
+    ) -> Result<i64> {
+        let mut query = SqlBuilder::select_from("entries");
+        query.field("count(1)");
+        for filter in filters {
+            match filter {
+                FilterMode::All => &mut query,
+                FilterMode::Directory => query.and_where_eq("cwd", quote(&context.cwd)),
+                FilterMode::Workspace => query.and_where_eq(
+                    "cwd",
+                    quote(
+                        context
+                            .cgd
+                            .as_ref()
+                            .unwrap_or(&"XXXXXXXXXXXXXX".to_string()),
+                    ),
+                ),
+            };
+        }
+
+        if !search.is_empty() {
+            query.and_where_like_any("value", search);
+        }
+
+        let query = query.sql().expect("Failed to parse query");
+        let res: (i64,) = sqlx::query_as(&query).fetch_one(&self.pool).await?;
+
+        Ok(res.0)
     }
 }

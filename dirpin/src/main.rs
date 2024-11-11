@@ -2,6 +2,7 @@ use clap::Parser;
 use eyre::Result;
 use command::DirpinCmd;
 mod command;
+mod tui;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 

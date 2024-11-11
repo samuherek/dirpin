@@ -1,8 +1,9 @@
 use clap::Parser;
-use dirpin_client::database::{Database, current_context};
-use dirpin_client::interactive;
+use dirpin_client::database::{current_context, Database};
 use dirpin_client::settings::Settings;
 use eyre::Result;
+
+mod interactive;
 
 #[derive(Parser, Debug)]
 #[clap(infer_subcommands = true)]
