@@ -123,6 +123,9 @@ pub async fn login(
     }))
 }
 
+// TODO:: we don't actually use this in the dirpin client. 
+// But we might want to use it at some point. In the client
+// we just remove the session from the host. 
 pub async fn logout(
     session: UserSession,
     state: State<AppState>,

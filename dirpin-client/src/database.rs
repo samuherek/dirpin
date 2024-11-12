@@ -181,7 +181,7 @@ impl Database {
     }
 
     pub async fn delete(&self, id: Uuid) -> Result<()> {
-        sqlx::query("update entries set deleted_at = ?2 where id = ?1")
+        sqlx::query("update entries set deleted_at = ?2, updated_at = ?2 where id = ?1")
             .bind(id.to_string())
             .bind(OffsetDateTime::now_utc().unix_timestamp())
             .execute(&self.pool)
