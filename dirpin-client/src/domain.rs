@@ -79,6 +79,8 @@ impl std::fmt::Display for HostId {
 #[derive(Debug, Clone)]
 pub enum EntryKind {
     Note,
+    Cmd,
+    Todo,
 }
 
 impl FromStr for EntryKind {
@@ -87,6 +89,8 @@ impl FromStr for EntryKind {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "note" => Ok(Self::Note),
+            "cmd" => Ok(Self::Cmd),
+            "todo" => Ok(Self::Todo),
             _ => Err("Unknown entry kind".to_string()),
         }
     }
@@ -96,6 +100,8 @@ impl EntryKind {
     pub fn as_str(&self) -> &'static str {
         match self {
             EntryKind::Note => "note",
+            EntryKind::Cmd => "cmd",
+            EntryKind::Todo => "todo",
         }
     }
 }

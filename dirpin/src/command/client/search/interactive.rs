@@ -3,17 +3,19 @@ use crossterm::event::{
     Event as CrosstermEvent, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
 };
 use dirpin_client::database::{Context, Database, FilterMode};
-use dirpin_client::domain::Entry;
+use dirpin_client::domain::{Entry, EntryKind};
 use dirpin_client::settings::Settings;
 use eyre::{Context as EyreContext, Result};
 use futures_util::stream::StreamExt;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Position, Rect};
 use ratatui::prelude::{Buffer, Widget};
-use ratatui::style::palette::tailwind::{GRAY, RED, SLATE};
+use ratatui::style::palette::tailwind::{GRAY, RED, SLATE, YELLOW};
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Frame;
+use std::str::FromStr;
+use time::OffsetDateTime;
 use tokio::sync::mpsc;
 use tokio::time::{sleep, Duration};
 
@@ -194,9 +196,31 @@ impl PromptConfirm {
 }
 
 #[derive(Debug)]
+struct PromptInput {
+    input: InputCursor,
+}
+
+impl PromptInput {
+    fn builder() -> Self {
+        Self {
+            input: InputCursor::default(),
+        }
+    }
+
+    fn input(mut self, value: &str) -> Self {
+        self.input.set(value);
+        self
+    }
+
+    fn value(&self) -> &str {
+        self.input.as_str()
+    }
+}
+
+#[derive(Debug)]
 enum PromptState {
     Default,
-    Input,
+    Input(PromptInput),
     Confirm(PromptConfirm),
     Search(PromptSearch),
     Info(PromptInfo),
@@ -206,7 +230,7 @@ impl PromptState {
     fn prefix(&self) -> Option<String> {
         match self {
             PromptState::Default => None,
-            PromptState::Input => Some(": ".into()),
+            PromptState::Input(_) => Some("Cmd: ".into()),
             PromptState::Search(_) => Some("Search: ".into()),
             PromptState::Info(_) => None,
             PromptState::Confirm(_) => None,
@@ -216,20 +240,22 @@ impl PromptState {
     fn value(&self) -> String {
         match self {
             PromptState::Default => "Type : to entr command".into(),
-            PromptState::Input => "TODO: input".into(),
+            PromptState::Input(i) => i.value().into(),
             PromptState::Search(s) => s.value().into(),
             PromptState::Info(i) => i.value().into(),
-            PromptState::Confirm(confirm) => format!("Are you sure? (y)  {}", confirm.value()),
+            PromptState::Confirm(confirm) => {
+                format!("You really want to delete? (y)  {}", confirm.value())
+            }
         }
     }
 
     fn style(&self) -> Style {
         match self {
             PromptState::Default => Style::new().fg(GRAY.c500),
-            PromptState::Input => todo!(),
+            PromptState::Input(_) => Style::default(),
             PromptState::Search(s) => match s.step {
                 PromptSearchStep::Edit => Style::default(),
-                PromptSearchStep::Submit => Style::new(),
+                PromptSearchStep::Submit => Style::new().fg(YELLOW.c500),
             },
             PromptState::Info(i) => match i.kind {
                 InfoKind::Error => Style::new().fg(RED.c500),
@@ -256,10 +282,22 @@ impl PromptState {
         PromptState::Confirm(confirm)
     }
 
+    fn input() -> Self {
+        let input = PromptInput::builder();
+        PromptState::Input(input)
+    }
+
     fn info(value: String) -> Self {
         let info = PromptInfo::builder()
             .set_value(value)
             .set_kind(InfoKind::Normal);
+        PromptState::Info(info)
+    }
+
+    fn error(value: String) -> Self {
+        let info = PromptInfo::builder()
+            .set_value(value)
+            .set_kind(InfoKind::Error);
         PromptState::Info(info)
     }
 
@@ -345,9 +383,13 @@ impl<T> List<T> {
     fn set_data(&mut self, data: Vec<T>) {
         // TODO: we probably don't want to replace it all the time.
         // Instead just clear and load the data to the same vector?
-        self.selected = self.selected.min(data.len() - 1);
+        self.selected = self.selected.min(data.len().saturating_sub(1));
         self.items = data;
         self.offset = 0;
+    }
+
+    fn set_selected(&mut self, idx: usize) {
+        self.selected = idx.clamp(0, self.items.len());
     }
 }
 
@@ -374,11 +416,9 @@ impl<T> SelectableList for List<T> {
 #[derive(Debug)]
 struct EntryList {
     list: List<Entry>,
-    show_preview: bool,
     context: Context,
     context_len: i64,
     filter_mode: FilterMode,
-    refetch: bool,
 }
 
 impl EntryList {
@@ -408,13 +448,24 @@ impl EntryList {
 }
 
 #[derive(Debug)]
+struct KindList {
+    list: List<(&'static str, &'static str)>,
+}
+
+impl KindList {
+    fn items(&self) -> &[(&'static str, &'static str)] {
+        &self.list.items
+    }
+}
+
+#[derive(Debug)]
 struct DirList {
     list: List<String>,
 }
 
 #[derive(Debug, Clone)]
 enum BlockFocus {
-    List,
+    Main,
     Prompt,
     Debug,
 }
@@ -428,7 +479,7 @@ impl BlockFocus {
 #[derive(Debug)]
 enum Route {
     EntryList,
-    DirectoryList,
+    KindList,
     Help,
 }
 
@@ -459,6 +510,7 @@ impl<'a> Debug<'a> {
 #[derive(Debug)]
 enum QueryKind {
     Entries,
+    SaveEntry,
     DeleteEntry,
 }
 
@@ -475,9 +527,16 @@ impl QueryQueue {
     }
 }
 
+fn padd(value: &str, len: usize) -> String {
+    let padding = (len - value.len()) / 2;
+    let formatted = format!("[ {:^width$} ]", value, width = value.len() + padding * 2);
+    formatted
+}
+
 struct AppState<'a> {
     route: Route,
     entry_list: EntryList,
+    kind_list: KindList,
     directory_list: DirList,
     prompt: PromptState,
     block_focus: BlockFocus,
@@ -527,10 +586,17 @@ impl AppState<'_> {
         Ok(())
     }
 
-    async fn query_save(&mut self, item: &Entry) -> Result<()> {
-        // self.database.save(item).await?;
+    async fn query_save(&mut self) -> Result<()> {
+        match self.entry_list.list.selected_mut() {
+            Some(item) => {
+                item.version += 1;
+                item.updated_at = OffsetDateTime::now_utc();
+                self.database.save(item).await?;
 
-        Ok(())
+                Ok(())
+            }
+            None => Err(eyre::eyre!("Failed to get selected entry")),
+        }
     }
 
     fn quit(&mut self) {
@@ -552,8 +618,26 @@ impl AppState<'_> {
         self.prompt = prompt;
     }
 
+    fn set_route(&mut self, route: Route) {
+        self.route = route;
+    }
+
+    fn set_selected_entry_kind(&mut self) {
+        let item = self.entry_list.list.selected_item();
+        let pos = self
+            .kind_list
+            .items()
+            .iter()
+            .position(|(x, _)| *x == item.kind.as_str());
+        if let Some(pos) = pos {
+            self.kind_list.list.set_selected(pos);
+        } else {
+            self.kind_list.list.set_selected(0);
+        }
+    }
+
     fn handle_prompt_search_exit(&mut self) {
-        self.block_focus = BlockFocus::List;
+        self.block_focus = BlockFocus::Main;
         self.prompt.set(PromptState::Default);
         self.query_queue.push(QueryKind::Entries);
     }
@@ -632,7 +716,7 @@ impl AppState<'_> {
         match event.code {
             KeyCode::Char('d') if ctrl => {
                 if self.debug.show {
-                    self.block_focus = self.debug.return_focus.clone().unwrap_or(BlockFocus::List);
+                    self.block_focus = self.debug.return_focus.clone().unwrap_or(BlockFocus::Main);
                     self.debug.show = false;
                 } else {
                     self.debug.return_focus = Some(self.block_focus.clone());
@@ -660,7 +744,7 @@ impl AppState<'_> {
 
         // Handle prompt events
         event = match self.block_focus {
-            BlockFocus::List => match self.route {
+            BlockFocus::Main => match self.route {
                 Route::EntryList => {
                     match self.prompt {
                         PromptState::Search(_) => match key_event.code {
@@ -688,12 +772,45 @@ impl AppState<'_> {
                             self.set_prompt(PromptState::confirm(ConfirmKind::DeleteEntry));
                             self.set_focus(BlockFocus::Prompt);
                         }
+                        KeyCode::Char('t') => {
+                            self.set_focus(BlockFocus::Main);
+                            self.set_route(Route::KindList);
+                            self.set_prompt(PromptState::Default);
+                            self.set_selected_entry_kind();
+                        }
+                        KeyCode::Char(':') => {
+                            self.set_prompt(PromptState::input());
+                            self.set_focus(BlockFocus::Prompt);
+                        }
                         _ => {}
                     }
 
                     None
                 }
-                Route::DirectoryList => None,
+                Route::KindList => {
+                    match key_event.code {
+                        KeyCode::Char('j') => self.kind_list.list.move_down(),
+                        KeyCode::Char('k') => self.kind_list.list.move_up(),
+                        KeyCode::Enter => {
+                            // TODO: error  handling here
+                            let item = self.entry_list.list.selected_mut().unwrap();
+                            let (kind, _) = self.kind_list.list.selected_item();
+                            item.kind = EntryKind::from_str(kind).unwrap();
+                            self.query_queue.push(QueryKind::SaveEntry);
+                            self.set_route(Route::EntryList);
+                        }
+                        KeyCode::Esc => {
+                            self.set_route(Route::EntryList);
+                        }
+                        KeyCode::Char(':') => {
+                            self.set_prompt(PromptState::input());
+                            self.set_focus(BlockFocus::Prompt);
+                        }
+                        _ => {}
+                    }
+
+                    None
+                }
                 _ => None,
             },
             BlockFocus::Prompt => match &mut self.prompt {
@@ -714,7 +831,7 @@ impl AppState<'_> {
                             None
                         }
                         KeyCode::Enter => {
-                            self.block_focus = BlockFocus::List;
+                            self.block_focus = BlockFocus::Main;
                             search.set_step(PromptSearchStep::Submit);
                             None
                         }
@@ -726,7 +843,36 @@ impl AppState<'_> {
                     },
                     _ => None,
                 },
-                PromptState::Input => todo!("handle prompt input"),
+                PromptState::Input(input) => match key_event.code {
+                    KeyCode::Char(c) => {
+                        input.input.insert(c);
+                        None
+                    }
+                    KeyCode::Backspace => {
+                        input.input.remove();
+                        None
+                    }
+                    KeyCode::Enter => {
+                        match input.value().trim() {
+                            "type" => {
+                                self.set_focus(BlockFocus::Main);
+                                self.set_route(Route::KindList);
+                                self.set_prompt(PromptState::Default);
+                            }
+                            _ => {
+                                self.set_focus(BlockFocus::Main);
+                                self.set_prompt(PromptState::info("Unknown command".into()));
+                            }
+                        }
+                        None
+                    }
+                    KeyCode::Esc => {
+                        self.block_focus = BlockFocus::Main;
+                        self.prompt.set(PromptState::Default);
+                        None
+                    }
+                    _ => None,
+                },
                 PromptState::Confirm(confirm) => match key_event.code {
                     KeyCode::Char(c) => {
                         confirm.input.insert(c);
@@ -737,7 +883,7 @@ impl AppState<'_> {
                         None
                     }
                     KeyCode::Enter => {
-                        self.block_focus = BlockFocus::List;
+                        self.block_focus = BlockFocus::Main;
                         match confirm.value() {
                             "y" => {
                                 self.query_queue.push(QueryKind::DeleteEntry);
@@ -754,7 +900,7 @@ impl AppState<'_> {
                         None
                     }
                     KeyCode::Esc => {
-                        self.block_focus = BlockFocus::List;
+                        self.block_focus = BlockFocus::Main;
                         self.prompt.set(PromptState::Default);
                         None
                     }
@@ -772,42 +918,6 @@ impl AppState<'_> {
             }
         };
 
-        // event = match self.route {
-        //     Route::EntryList => match self.block_focus {
-        //         BlockFocus::List => handle_active_entry_list(self, &key_event),
-        //         BlockFocus::Prompt => match self.prompt {
-        //             PromptState::Search(_) => handle_prompt_search_entry_list(self, &key_event),
-        //             PromptState::Input => todo!("handle prompt input"),
-        //             _ => None,
-        //         },
-        //     },
-        //     Route::DirectoryList => todo!(),
-        //     Route::Help => todo!(),
-        // };
-
-        // event = match self.keymap_mode {
-        //     KeymapMode::Normal => match key_event.code {
-        //         KeyCode::Char('j') => self.handle_search_down(),
-        //         KeyCode::Char('k') => self.handle_search_up(),
-        //         KeyCode::Char('e') => self.handle_edit().await,
-        //         KeyCode::Char('/') => self.handle_keymap_mode(KeymapMode::Insert),
-        //         KeyCode::Char('p') => self.handle_toggle_preview(),
-        //         _ => None,
-        //     },
-        //     KeymapMode::Insert => match key_event.code {
-        //         KeyCode::Esc => self.handle_keymap_mode(KeymapMode::Normal),
-        //         KeyCode::Char(c) => {
-        //             self.prompt.input.insert(c);
-        //             None
-        //         }
-        //         KeyCode::Backspace => {
-        //             self.prompt.input.remove();
-        //             None
-        //         }
-        //         _ => None,
-        //     },
-        // };
-
         event
     }
 
@@ -821,14 +931,7 @@ impl AppState<'_> {
 
     fn build_context(&self) -> Paragraph {
         // NOTE: This is set basd on the long set word as hardcoded value for now!
-        let max_len = format!("workspace").len();
-        let context_value = self.entry_list.filter_mode.as_str();
-        let padding = (max_len - context_value.len()) / 2;
-        let formatted = format!(
-            "[ {:^width$} ]",
-            context_value,
-            width = context_value.len() + padding * 2
-        );
+        let formatted = padd(self.entry_list.filter_mode.as_str(), 9);
 
         let context_target = match self.entry_list.filter_mode {
             FilterMode::All => &self.entry_list.context.hostname,
@@ -876,7 +979,8 @@ impl AppState<'_> {
                     }
                 };
                 Line::from(vec![
-                    Span::styled("[   note    ]  ", Style::new().fg(GRAY.c500)),
+                    Span::styled(padd(x.kind.as_str(), 11), Style::new().fg(GRAY.c500)),
+                    Span::raw("  "),
                     Span::raw(x.value.as_str()),
                     Span::styled(format!("  {}", context), Style::new().fg(GRAY.c500)),
                 ])
@@ -892,14 +996,6 @@ impl AppState<'_> {
                 rect,
             ),
             _ => {
-                let constraints = if self.entry_list.show_preview {
-                    vec![Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)]
-                } else {
-                    vec![Constraint::Min(1), Constraint::Max(0)]
-                };
-                let layout_main = Layout::new(Direction::Horizontal, constraints);
-                let [list_l, preview_l] = layout_main.areas(rect);
-
                 for (i, line) in lines.into_iter().enumerate() {
                     let style = if self.entry_list.list.selected() == i {
                         Style::new().bg(GRAY.c800)
@@ -907,24 +1003,66 @@ impl AppState<'_> {
                         Style::new()
                     };
 
-                    let item_rect = Rect::new(list_l.x, list_l.y + i as u16, list_l.width, 1);
+                    let item_rect = Rect::new(rect.x, rect.y + i as u16, rect.width, 1);
                     let paragraph = Paragraph::new(line).style(style);
                     frame.render_widget(paragraph, item_rect);
                 }
-
-                // if self.entry_list.show_preview {
-                //     let layout_main = Layout::new(
-                //         Direction::Horizontal,
-                //         vec![Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)],
-                //     );
-                //     let [list_l, preview_l] = layout_main.areas(rect);
-                //
-                //     frame.render_widget(content, list_l);
-                //     // frame.render_widget(preview, preview_l);
-                // } else {
-                //     frame.render_widget(content, rect);
-                // }
             }
+        }
+    }
+
+    fn render_kind_list(&self, frame: &mut Frame, rect: Rect) {
+        let item = self.entry_list.list.selected_item();
+        let layout = Layout::new(
+            Direction::Vertical,
+            [
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Min(1),
+            ],
+        );
+        let [line_l, space_l, main_l] = layout.areas(rect);
+
+        let line = Paragraph::new(Line::from(vec![
+            Span::styled(
+                format!("{}  ", padd(item.kind.as_str(), 10)),
+                Style::new().fg(GRAY.c500),
+            ),
+            Span::raw(item.value.as_str()),
+        ]));
+        frame.render_widget(line, line_l);
+
+        frame.render_widget(Paragraph::new(""), space_l);
+
+        let selected_idx = self.kind_list.list.selected();
+        let lines = self
+            .kind_list
+            .items()
+            .iter()
+            .enumerate()
+            .map(|(i, (x, desc))| {
+                let style = if selected_idx == i {
+                    Style::new()
+                } else {
+                    Style::new().fg(GRAY.c500)
+                };
+                Line::from(vec![
+                    Span::styled(padd(x, 10), style),
+                    Span::raw("  "),
+                    Span::styled(*desc, Style::new().fg(GRAY.c500)),
+                ])
+            })
+            .collect::<Vec<_>>();
+
+        for (i, line) in lines.into_iter().enumerate() {
+            let style = if selected_idx == i {
+                Style::new().bg(GRAY.c800)
+            } else {
+                Style::new()
+            };
+            let item_rect = Rect::new(main_l.x, main_l.y + i as u16, main_l.width, 1);
+            let paragraph = Paragraph::new(line).style(style);
+            frame.render_widget(paragraph, item_rect);
         }
     }
 
@@ -986,7 +1124,9 @@ impl AppState<'_> {
             Route::EntryList => {
                 self.render_entry_list(frame, main_l);
             }
-            Route::DirectoryList => todo!(),
+            Route::KindList => {
+                self.render_kind_list(frame, main_l);
+            }
             Route::Help => todo!(),
         }
         frame.render_widget(self.build_prompt(), prompt_l);
@@ -1009,6 +1149,11 @@ impl AppState<'_> {
                             + self.prompt.value().len();
                         frame.set_cursor_position(Position::new(rect.x + (len as u16), rect.y));
                     }
+                }
+                PromptState::Input(_) | PromptState::Confirm(_) => {
+                    let len =
+                        self.prompt.prefix().unwrap_or("".into()).len() + self.prompt.value().len();
+                    frame.set_cursor_position(Position::new(rect.x + (len as u16), rect.y));
                 }
                 _ => {}
             },
@@ -1068,17 +1213,25 @@ pub async fn run(settings: &Settings, db: &Database, context: &Context) -> Resul
         route: Route::EntryList,
         entry_list: EntryList {
             list: List::new(Vec::new()),
-            show_preview: false,
             context: context.clone(),
             context_len: 0,
             filter_mode: FilterMode::Directory,
-            refetch: false,
+        },
+        kind_list: KindList {
+            list: List::new(vec![
+                ("note", "Just a standard note about anything"),
+                (
+                    "cmd",
+                    "A command type that can be copied and executed in terminal",
+                ),
+                ("todo", "Please do me :D"),
+            ]),
         },
         directory_list: DirList {
             list: List::new(Vec::new()),
         },
         prompt: PromptState::Default,
-        block_focus: BlockFocus::List,
+        block_focus: BlockFocus::Main,
         query_queue: QueryQueue(Vec::new()),
         database: db,
         status: RunningState::Active,
@@ -1131,22 +1284,30 @@ pub async fn run(settings: &Settings, db: &Database, context: &Context) -> Resul
 
         while let Some(query) = app.query_queue.pop() {
             match query {
-                QueryKind::Entries => {
-                    app.query_entry_list().await?;
-                }
-                QueryKind::DeleteEntry => {
-                    app.query_delete().await?;
-                }
+                QueryKind::Entries => match app.query_entry_list().await {
+                    Ok(_) => {}
+                    Err(_) => {
+                        app.set_prompt(PromptState::error("Failed to query entries".into()));
+                    }
+                },
+                QueryKind::DeleteEntry => match app.query_delete().await {
+                    Ok(_) => {
+                        app.set_prompt(PromptState::info("Item deleted".into()));
+                    }
+                    Err(_) => {
+                        app.set_prompt(PromptState::error("Failed to delete entry".into()));
+                    }
+                },
+                QueryKind::SaveEntry => match app.query_save().await {
+                    Ok(_) => {
+                        app.set_prompt(PromptState::info("Item updated".into()));
+                    }
+                    Err(_) => {
+                        app.set_prompt(PromptState::error("Failed to update entry".into()));
+                    }
+                },
             }
         }
-        //
-        // if app.entry_list.refetch {
-        //     app.query_entry_list().await?;
-        //     app.entry_list.refetch = false;
-        // }
-        // if app.prompt.source().len() > 0 || matches!(app.keymap_mode, KeymapMode::Insert) {
-        //     app.query_list(context).await?
-        // }
     }
 
     tui::restore()?;

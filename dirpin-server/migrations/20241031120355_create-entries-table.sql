@@ -5,7 +5,10 @@ create table if not exists entries(
     user_id integer not null,       -- id of the registered user
     timestamp integer not null,     -- nonencryped metadata to konw the last update
     version integer not null,       -- nonencryped metadata to know the latest update
-    data text not null             -- encrypted data for the pin
+    data text not null,             -- encrypted data for the pin
+    deleted_at                      -- Soft delete
 );
 
 create index if not exists idx_entries_timestamp on entries(timestamp);
+create index if not exists idx_entries_deleted_at on entries(deleted_at);
+ 

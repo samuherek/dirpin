@@ -26,7 +26,9 @@ impl<'r> FromRow<'r, SqliteRow> for DbEntry {
             value: row.try_get("value")?,
             data: row.try_get("data")?,
             // TODO: fix this deserialization with the serde_json
-            kind: row.try_get("kind").map(|_x: &str| EntryKind::Note)?,
+            kind: row
+                .try_get("kind")
+                .map(|x: &str| EntryKind::from_str(x).unwrap())?,
             hostname: row.try_get("hostname")?,
             cwd: row.try_get("cwd")?,
             cgd: row.try_get("cgd")?,
