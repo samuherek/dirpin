@@ -14,6 +14,10 @@ pub async fn sync(
     state: State<AppState>,
     _params: Query<SyncRequest>,
 ) -> Result<Json<SyncResponse>, ServerError> {
+    // user_id
+    // updated at after...
+    //
+    // page size -> for now ignore
     let res = state.database.list_entries().await.map_err(|err| {
         error!("Failed to list entries {err}");
         ServerError::DatabaseError("list entries")
@@ -35,9 +39,9 @@ pub async fn add(
         .map(|x| NewEntry {
             client_id: x.id,
             user_id: 1,
-            timestamp: x.timestamp,
             version: x.version,
             data: x.data,
+            updated_at: x.updated_at,
             deleted_at: x.deleted_at,
         })
         .collect::<Vec<_>>();

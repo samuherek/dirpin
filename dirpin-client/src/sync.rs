@@ -85,10 +85,10 @@ async fn sync_upload(
 
         let p = AddEntryRequest {
             id: el.id.to_string(),
-            timestamp: el.updated_at,
             version: el.version,
             data,
-            deleted_at: el.deleted_at
+            updated_at: el.updated_at,
+            deleted_at: el.deleted_at,
         };
         buffer.push(p);
     }

@@ -4,9 +4,9 @@ use time::OffsetDateTime;
 pub struct NewEntry {
     pub client_id: String,
     pub user_id: i64,
-    pub timestamp: OffsetDateTime,
     pub version: u32,
     pub data: String,
+    pub updated_at: OffsetDateTime,
     pub deleted_at: Option<OffsetDateTime>,
 }
 
@@ -15,9 +15,10 @@ pub struct Entry {
     pub id: u32,
     pub client_id: String,
     pub user_id: i64,
-    pub timestamp: OffsetDateTime,
     pub version: u32,
     pub data: String,
+    pub created_at: OffsetDateTime,
+    pub updated_at: OffsetDateTime,
     pub deleted_at: Option<OffsetDateTime>,
 }
 

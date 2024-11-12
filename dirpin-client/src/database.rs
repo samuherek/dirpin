@@ -181,7 +181,7 @@ impl Database {
     }
 
     pub async fn delete(&self, id: Uuid) -> Result<()> {
-        sqlx::query("update entries set deleted_at = ?2, updated_at = ?2 where id = ?1")
+        sqlx::query("update entries set deleted_at = ?2 where id = ?1")
             .bind(id.to_string())
             .bind(OffsetDateTime::now_utc().unix_timestamp())
             .execute(&self.pool)
@@ -190,10 +190,10 @@ impl Database {
         Ok(())
     }
 
-    pub async fn after(&self, timestamp: OffsetDateTime) -> Result<Vec<Entry>> {
+    pub async fn after(&self, updated_at: OffsetDateTime) -> Result<Vec<Entry>> {
         debug!("Query entries before from datbase");
         let res = sqlx::query_as("select * from entries where updated_at > ?1")
-            .bind(timestamp.unix_timestamp_nanos() as i64)
+            .bind(updated_at.unix_timestamp_nanos() as i64)
             .fetch(&self.pool)
             .map_ok(|DbEntry(entry)| entry)
             .try_collect()

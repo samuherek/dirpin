@@ -24,11 +24,14 @@ impl<'r> FromRow<'r, SqliteRow> for DbEntry {
             id: row.try_get("id")?,
             client_id: row.try_get("client_id")?,
             user_id: row.try_get("user_id")?,
-            timestamp: row
-                .try_get("timestamp")
-                .map(|x: i64| OffsetDateTime::from_unix_timestamp_nanos(x as i128).unwrap())?,
             version: row.try_get("version")?,
             data: row.try_get("data")?,
+            created_at: row
+                .try_get("created_at")
+                .map(|x: i64| OffsetDateTime::from_unix_timestamp(x).unwrap())?,
+            updated_at: row
+                .try_get("updated_at")
+                .map(|x: i64| OffsetDateTime::from_unix_timestamp_nanos(x as i128).unwrap())?,
             deleted_at: row
                 .try_get("deleted_at")
                 .map(|x: i64| OffsetDateTime::from_unix_timestamp(x).ok())?,
@@ -136,26 +139,28 @@ impl Database {
             sqlx::query(
                 r#"
                 insert into entries(
-                    client_id, user_id, timestamp, version, data, deleted_at
+                    client_id, user_id, updated_at, version, data, deleted_at, created_at
                 ) 
                 values(
-                    ?1, ?2, ?3, ?4, ?5, ?6
+                    ?1, ?2, ?3, ?4, ?5, ?6, ?7
                 )
                 on conflict(client_id) do update set
                     client_id = ?1,
                     user_id = ?2,
-                    timestamp = ?3, 
+                    updated_at = ?3, 
                     version = ?4, 
                     data = ?5,
-                    deleted_at = ?6
+                    deleted_at = ?6,
+                    created_at = ?7
             "#,
             )
             .bind(el.client_id.as_str())
             .bind(el.user_id)
-            .bind(el.timestamp.unix_timestamp_nanos() as i64)
+            .bind(el.updated_at.unix_timestamp_nanos() as i64)
             .bind(el.version)
             .bind(el.data.as_str())
             .bind(el.deleted_at.map(|x| x.unix_timestamp()))
+            .bind(OffsetDateTime::now_utc().unix_timestamp())
             .execute(&mut *tx)
             .await
             .map_err(db_error)?;

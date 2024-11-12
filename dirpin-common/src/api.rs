@@ -21,10 +21,10 @@ pub struct SyncResponse {
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct AddEntryRequest {
     pub id: String,
-    #[serde(with = "time::serde::rfc3339")]
-    pub timestamp: OffsetDateTime,
     pub version: u32,
     pub data: String,
+    #[serde(with = "time::serde::rfc3339")]
+    pub updated_at: OffsetDateTime,
     #[serde(with = "time::serde::rfc3339::option")]
     pub deleted_at: Option<OffsetDateTime>,
 }
