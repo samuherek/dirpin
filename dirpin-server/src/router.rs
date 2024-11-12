@@ -18,8 +18,8 @@ async fn not_found() -> impl IntoResponse {
 pub fn router(database: Database) -> Router {
     let routes = Router::new()
         .route("/", get(handlers::index))
-        .route("/sync", get(handlers::sync))
-        .route("/entries", post(handlers::add))
+        .route("/sync", get(handlers::entry::sync))
+        .route("/entries", post(handlers::entry::add))
         .route("/register", post(handlers::user::register))
         .route("/login", post(handlers::user::login))
         .route("/logout", get(handlers::user::logout));

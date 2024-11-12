@@ -7,6 +7,7 @@ pub struct NewEntry {
     pub timestamp: OffsetDateTime,
     pub version: u32,
     pub data: String,
+    pub deleted_at: Option<OffsetDateTime>,
 }
 
 #[derive(Debug)]
@@ -17,6 +18,7 @@ pub struct Entry {
     pub timestamp: OffsetDateTime,
     pub version: u32,
     pub data: String,
+    pub deleted_at: Option<OffsetDateTime>,
 }
 
 #[derive(Debug)]

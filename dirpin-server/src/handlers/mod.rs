@@ -1,12 +1,9 @@
-use crate::authentication::UserSession;
-use crate::models::NewEntry;
-use crate::router::AppState;
-use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json};
-use dirpin_common::api::{AddEntryRequest, HealthCheckResponse, SyncRequest, SyncResponse};
+use dirpin_common::api::HealthCheckResponse;
 use tracing::error;
 
+pub mod entry;
 pub mod user;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -99,45 +96,4 @@ pub async fn index() -> Result<Json<HealthCheckResponse>, ServerError> {
         status: "Ok".to_string(),
         version,
     }))
-}
-
-// TODO: make a propert error response types
-pub async fn sync(
-    _session: UserSession,
-    state: State<AppState>,
-    _params: Query<SyncRequest>,
-) -> Result<Json<SyncResponse>, ServerError> {
-    let res = state.database.list_entries().await.map_err(|err| {
-        error!("Failed to list entries {err}");
-        ServerError::DatabaseError("list entries")
-    })?;
-
-    Ok(Json(SyncResponse {
-        updated: res.into_iter().map(|x| x.data).collect::<Vec<_>>(),
-        deleted: vec![],
-    }))
-}
-
-pub async fn add(
-    _session: UserSession,
-    state: State<AppState>,
-    Json(req): Json<Vec<AddEntryRequest>>,
-) -> Result<impl IntoResponse, ServerError> {
-    let entries = req
-        .into_iter()
-        .map(|x| NewEntry {
-            client_id: x.id,
-            user_id: 1,
-            timestamp: x.timestamp,
-            version: x.version,
-            data: x.data,
-        })
-        .collect::<Vec<_>>();
-
-    state.database.add_entries(&entries).await.map_err(|err| {
-        error!("Failed to add entries {err}");
-        ServerError::DatabaseError("add entries")
-    })?;
-
-    Ok(StatusCode::OK)
 }

@@ -25,6 +25,8 @@ pub struct AddEntryRequest {
     pub timestamp: OffsetDateTime,
     pub version: u32,
     pub data: String,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub deleted_at: Option<OffsetDateTime>,
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]

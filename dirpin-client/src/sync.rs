@@ -88,6 +88,7 @@ async fn sync_upload(
             timestamp: el.updated_at,
             version: el.version,
             data,
+            deleted_at: el.deleted_at
         };
         buffer.push(p);
     }
