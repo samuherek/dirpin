@@ -13,9 +13,24 @@ pub struct SyncRequest {
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
+/// The entry reference coming from the remote
+pub struct Deleted {
+    /// Host: id of the entry
+    pub client_id: String,
+    /// Host: version of the entry
+    pub version: u32,
+    /// Host: updated_at of the entry
+    pub updated_at: OffsetDateTime,
+    /// Host: deleted_at of the entry
+    pub deleted_at: OffsetDateTime,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct SyncResponse {
+    /// These are all with deleted_at field None
     pub updated: Vec<String>,
-    pub deleted: Vec<String>,
+    /// These are all with delted_at field Some(_)
+    pub deleted: Vec<Deleted>,
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]

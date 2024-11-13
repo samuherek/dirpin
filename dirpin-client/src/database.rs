@@ -1,4 +1,4 @@
-use crate::domain::{Entry, EntryKind};
+use crate::domain::{Entry, EntryDelete, EntryKind};
 use crate::utils::get_host_user;
 use dirpin_common::utils;
 use eyre::Result;
@@ -121,7 +121,7 @@ impl Database {
         Ok(())
     }
 
-    async fn save_raw(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, v: &Entry) -> Result<()> {
+    async fn save_tx(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, v: &Entry) -> Result<()> {
         sqlx::query(
             r#"
             insert into entries(
@@ -163,7 +163,7 @@ impl Database {
         debug!("Saving pin to database");
         let mut tx = self.pool.begin().await?;
         // TODO: if transaction fails, it does not throw error?
-        Self::save_raw(&mut tx, item).await?;
+        Self::save_tx(&mut tx, item).await?;
         tx.commit().await?;
 
         Ok(())
@@ -173,7 +173,83 @@ impl Database {
         debug!("Saving entries in bulk to database");
         let mut tx = self.pool.begin().await?;
         for el in items {
-            Self::save_raw(&mut tx, &el).await?;
+            Self::save_tx(&mut tx, &el).await?;
+        }
+        tx.commit().await?;
+
+        Ok(())
+    }
+
+    async fn save_conflict_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        v: &Entry,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            insert into conflicts(
+                id, value, data, kind, hostname, cwd, cgd, created_at, updated_at, deleted_at, version
+            ) values(
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11
+            )
+            on conflict(id) do update set
+                value = ?2,
+                data = ?3,
+                kind = ?4,
+                hostname = ?5,
+                cwd = ?6,
+                cgd = ?7,
+                created_at = ?8,
+                updated_at = ?9,
+                deleted_at = ?10,
+                version = ?11
+            "#,
+        )
+            .bind(v.id.to_string())
+            .bind(v.value.as_str())
+            .bind(v.data.to_owned())
+            .bind(v.kind.as_str())
+            .bind(v.hostname.as_str())
+            .bind(v.cwd.as_str())
+            .bind(v.cgd.to_owned())
+            .bind(v.created_at.unix_timestamp())
+            .bind(v.updated_at.unix_timestamp_nanos() as i64)
+            .bind(v.deleted_at.map(|x| x.unix_timestamp()))
+            .bind(v.version)
+        .execute(&mut **tx)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn save_conflicts_bulk(&self, items: &[Entry]) -> Result<()> {
+        debug!("Saving conflicts in bulk to database");
+        let mut tx = self.pool.begin().await?;
+        for el in items {
+            Self::save_conflict_tx(&mut tx, &el).await?;
+        }
+        tx.commit().await?;
+
+        Ok(())
+    }
+
+    pub async fn delete_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        v: &EntryDelete,
+    ) -> Result<()> {
+        sqlx::query("update entries set deleted_at = ?2 where id = ?1")
+            .bind(v.id.to_string())
+            .bind(v.deleted_at.unix_timestamp())
+            .execute(&mut **tx)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn delete_bulk(&self, items: &[EntryDelete]) -> Result<()> {
+        debug!("Deleting entries in bulk in database");
+        let mut tx = self.pool.begin().await?;
+        for el in items {
+            Self::delete_tx(&mut tx, &el).await?;
         }
         tx.commit().await?;
 
@@ -188,6 +264,17 @@ impl Database {
             .await?;
 
         Ok(())
+    }
+
+    pub async fn get_deleted(&self) -> Result<Vec<Entry>> {
+        debug!("Query entries deleted datbase");
+        let res = sqlx::query_as("select * from entries where deleted_at not null")
+            .fetch(&self.pool)
+            .map_ok(|DbEntry(entry)| entry)
+            .try_collect()
+            .await?;
+
+        Ok(res)
     }
 
     pub async fn after(&self, updated_at: OffsetDateTime) -> Result<Vec<Entry>> {

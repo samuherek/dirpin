@@ -123,8 +123,31 @@ impl Database {
         Ok(())
     }
 
-    pub async fn list_entries(&self) -> Result<Vec<Entry>, DbError> {
-        sqlx::query_as("select * from entries")
+    pub async fn list_entries(
+        &self,
+        user_id: u32,
+        from: OffsetDateTime,
+    ) -> Result<Vec<Entry>, DbError> {
+        sqlx::query_as(
+            "select * from entries where user_id = ?1 and updated_at >= ?2 and deleted_at is null",
+        )
+        .bind(user_id)
+        .bind(from.unix_timestamp_nanos() as i64)
+        .fetch(&self.pool)
+        .map_ok(|DbEntry(entry)| entry)
+        .try_collect()
+        .await
+        .map_err(db_error)
+    }
+
+    pub async fn list_entries_deleted(
+        &self,
+        user_id: u32,
+        from: OffsetDateTime,
+    ) -> Result<Vec<Entry>, DbError> {
+        sqlx::query_as("select * from entries where user_id = ?1 and deleted_at >= ?2")
+            .bind(user_id)
+            .bind(from.unix_timestamp_nanos() as i64)
             .fetch(&self.pool)
             .map_ok(|DbEntry(entry)| entry)
             .try_collect()

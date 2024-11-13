@@ -1,11 +1,12 @@
 use crate::utils;
+use dirpin_common::api::Deleted;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use sha2::{Digest, Sha256};
 use std::str::FromStr;
 use std::string::ToString;
 use time::OffsetDateTime;
-use uuid::Uuid;
+use uuid::{self, Uuid};
 
 /// Readable host identifier that is reasonably unique for the current user host group.
 /// This is mainly used for remote session identifiers or anything else that needs to be
@@ -145,5 +146,26 @@ impl Entry {
             deleted_at: None,
             version: 1,
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+/// Used as a version
+pub struct EntryDelete {
+    pub id: Uuid,
+    pub updated_at: OffsetDateTime,
+    pub deleted_at: OffsetDateTime,
+    pub version: u32,
+}
+impl TryFrom<Deleted> for EntryDelete {
+    type Error = uuid::Error;
+
+    fn try_from(value: Deleted) -> Result<Self, Self::Error> {
+        Ok(Self {
+            id: Uuid::parse_str(&value.client_id)?,
+            updated_at: value.updated_at,
+            deleted_at: value.deleted_at,
+            version: value.version,
+        })
     }
 }
