@@ -24,8 +24,8 @@ pub struct Entry {
     pub version: u32,
     /// Host: The encrypted data of the entry
     pub data: String,
-    /// Remote: created_at timestamp
-    pub created_at: OffsetDateTime,
+    /// Remote: synced_at timestamp
+    pub synced_at: OffsetDateTime,
     /// Host: updated_at of the entry to conflict detect uploads
     pub updated_at: OffsetDateTime,
     /// Host: deleted_at of the entry to conflict detect uploads

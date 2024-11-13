@@ -1,10 +1,11 @@
 use clap::Parser;
 use dirpin_client::database::{current_context, global_context, Database};
-use dirpin_client::domain::Entry;
+use dirpin_client::domain::{Entry, EntryKind};
 use dirpin_client::settings::Settings;
 use dirpin_common::utils;
 use eyre::{bail, Context, Result};
 use std::path::PathBuf;
+use std::str::FromStr;
 
 #[derive(Parser, Debug)]
 pub struct Cmd {
@@ -12,6 +13,9 @@ pub struct Cmd {
 
     #[arg(short, long)]
     global: bool,
+
+    #[arg(long("type"), short('t'), name("type"))]
+    kind: Option<String>,
 }
 
 impl Cmd {
@@ -37,8 +41,13 @@ impl Cmd {
             bail!("No input provided. Please run '--help' to see instructions.");
         };
 
-        let pin = Entry::new(input, context.hostname, context.cwd, context.cgd);
-        db.save(&pin).await?;
+        let mut entry = Entry::new(input, context.hostname, context.cwd, context.cgd);
+
+        if let Some(kind) = self.kind.map(|x| EntryKind::from_str(&x).unwrap()) {
+            entry = entry.kind(kind);
+        }
+
+        db.save(&entry).await?;
 
         println!("Entry added");
         Ok(())

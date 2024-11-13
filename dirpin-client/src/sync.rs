@@ -79,22 +79,16 @@ async fn sync_download(
 
     // Collect deleted entries into update buffer or conflict buffer.
     for (id, r) in remote {
-        // If there is some updated in the local "from_last_sync" we need to check if there is any
-        // possible conflicts.
         if let Some(l) = local.get_mut(&id) {
-            // If version and updated_at of local are both lower or equal to remote, it's safe to delete.
-            // Otherwise, other host made a change and delted before this sync happend. it's safe
-            // to delete this too.
-            if r.updated_at >= l.updated_at && r.version >= l.version {
-                delete_buf.push(r);
-            } else {
+            // If either version or updated_at are higher locally, it means there is some conflict.
+            if r.updated_at < l.updated_at || r.version < l.version {
                 l.deleted_at = Some(r.deleted_at);
                 conflict_buf.push(l.clone());
+                continue;
             }
-        // Otherwise the delete is newer than from last sync and it's safe to delete
-        } else {
-            delete_buf.push(r);
         }
+
+        delete_buf.push(r);
     }
 
     db.save_bulk(&update_buf).await?;
@@ -125,13 +119,17 @@ async fn sync_upload(
     session: &str,
     key: &Key,
     from: OffsetDateTime,
+    force: bool,
 ) -> Result<usize> {
     // TODO: Split this into pages so that we don't have massive payload.
-    let items = db.after(from).await?;
-    let deleted = db.deleted_after(from).await?;
+    let mut items = db.after(from).await?;
     let mut buffer = vec![];
 
-    for el in items.iter().chain(deleted.iter()) {
+    if !force {
+        items.extend(db.deleted_after(from).await?);
+    }
+
+    for el in &items {
         let data = encrypt(el, key)?;
         let data = serde_json::to_string(&data)?;
 
@@ -180,7 +178,7 @@ pub async fn sync(settings: &Settings, db: &Database, force: bool) -> Result<()>
     };
 
     let down_count = sync_download(settings, db, &session, &key, from.clone()).await?;
-    let up_count = sync_upload(settings, db, &session, &key, from).await?;
+    let up_count = sync_upload(settings, db, &session, &key, from, force).await?;
 
     println!("Sync done. {up_count} Uploaded / {down_count} Downloaded");
     Settings::save_last_sync()?;

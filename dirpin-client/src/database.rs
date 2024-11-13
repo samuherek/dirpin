@@ -236,11 +236,38 @@ impl Database {
         tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
         v: &EntryDelete,
     ) -> Result<()> {
-        sqlx::query("update entries set deleted_at = ?2 where id = ?1")
-            .bind(v.id.to_string())
-            .bind(v.deleted_at.unix_timestamp())
-            .execute(&mut **tx)
-            .await?;
+        sqlx::query(
+            r#"
+            insert into entries(
+                id, value, data, kind, hostname, cwd, created_at, updated_at, deleted_at, version
+            ) values(
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10
+            )
+            on conflict(id) do update set
+                value = ?2,
+                data = ?3,
+                kind = ?4,
+                hostname = ?5,
+                cwd = ?6,
+                created_at = ?7,
+                updated_at = ?8,
+                deleted_at = ?9,
+                version = ?10
+            "#,
+        )
+        .bind(v.id.to_string())
+        .bind("")
+        .bind("")
+        .bind(EntryKind::Note.to_string())
+        .bind("")
+        .bind("")
+        .bind(OffsetDateTime::now_utc().unix_timestamp())
+        .bind(v.updated_at.unix_timestamp_nanos() as i64)
+        .bind(v.deleted_at.unix_timestamp())
+        .bind(v.version)
+        .bind(OffsetDateTime::now_utc().unix_timestamp())
+        .execute(&mut **tx)
+        .await?;
 
         Ok(())
     }

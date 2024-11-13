@@ -26,8 +26,8 @@ impl<'r> FromRow<'r, SqliteRow> for DbEntry {
             user_id: row.try_get("user_id")?,
             version: row.try_get("version")?,
             data: row.try_get("data")?,
-            created_at: row
-                .try_get("created_at")
+            synced_at: row
+                .try_get("synced_at")
                 .map(|x: i64| OffsetDateTime::from_unix_timestamp(x).unwrap())?,
             updated_at: row
                 .try_get("updated_at")
@@ -162,7 +162,7 @@ impl Database {
             sqlx::query(
                 r#"
                 insert into entries(
-                    client_id, user_id, updated_at, version, data, deleted_at, created_at
+                    client_id, user_id, updated_at, version, data, deleted_at, synced_at
                 ) 
                 values(
                     ?1, ?2, ?3, ?4, ?5, ?6, ?7
@@ -174,7 +174,7 @@ impl Database {
                     version = ?4, 
                     data = ?5,
                     deleted_at = ?6,
-                    created_at = ?7
+                    synced_at = ?7
             "#,
             )
             .bind(el.client_id.as_str())

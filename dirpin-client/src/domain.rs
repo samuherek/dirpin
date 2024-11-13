@@ -78,6 +78,7 @@ impl std::fmt::Display for HostId {
 }
 
 #[derive(Debug, Clone)]
+/// TODO: Add the ability to have custom types
 pub enum EntryKind {
     Note,
     Cmd,
@@ -92,7 +93,7 @@ impl FromStr for EntryKind {
             "note" => Ok(Self::Note),
             "cmd" => Ok(Self::Cmd),
             "todo" => Ok(Self::Todo),
-            _ => Err("Unknown entry kind".to_string()),
+            _ => Ok(Self::Note),
         }
     }
 }
@@ -146,6 +147,11 @@ impl Entry {
             deleted_at: None,
             version: 1,
         }
+    }
+
+    pub fn kind(mut self, kind: EntryKind) -> Self {
+        self.kind = kind;
+        self
     }
 }
 
