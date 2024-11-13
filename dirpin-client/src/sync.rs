@@ -8,6 +8,7 @@ use dirpin_common::api::AddEntryRequest;
 use eyre::Result;
 use std::collections::HashMap;
 use time::OffsetDateTime;
+use tracing::debug;
 use uuid::Uuid;
 
 /// Get the list of the updates (full data)
@@ -38,6 +39,9 @@ async fn sync_download(
         .map(|x| decrypt(x, key).expect("failed to decrypt entry. check key!"))
         .map(|x| (x.id.clone(), x))
         .collect();
+
+    debug!("local update count {}", local.len());
+    debug!("remote update download count {}", remote.len());
 
     let mut update_buf: Vec<Entry> = vec![];
     let mut conflict_buf: Vec<Entry> = vec![];
@@ -76,6 +80,9 @@ async fn sync_download(
         .filter_map(|x| x.try_into().ok())
         .map(|x: EntryDelete| (x.id.clone(), x))
         .collect();
+
+    debug!("local remote count {}", local.len());
+    debug!("remote remote count {}", remote.len());
 
     // Collect deleted entries into update buffer or conflict buffer.
     for (id, r) in remote {
@@ -129,6 +136,8 @@ async fn sync_upload(
         items.extend(db.deleted_after(from).await?);
     }
 
+    debug!("uploading count {}", items.len());
+
     for el in &items {
         let data = encrypt(el, key)?;
         let data = serde_json::to_string(&data)?;
@@ -176,6 +185,8 @@ pub async fn sync(settings: &Settings, db: &Database, force: bool) -> Result<()>
     } else {
         from
     };
+
+    debug!("staring sync sesion from {from:?}");
 
     let down_count = sync_download(settings, db, &session, &key, from.clone()).await?;
     let up_count = sync_upload(settings, db, &session, &key, from, force).await?;

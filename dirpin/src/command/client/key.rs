@@ -4,6 +4,7 @@ use eyre::Result;
 
 pub fn run(settings: &Settings) -> Result<()> {
     let key = encryption::load_key(settings)?;
-    println!("key after load: {key:?}");
+    let key = encryption::encode_key(&key)?;
+    println!("{key}");
     Ok(())
 }

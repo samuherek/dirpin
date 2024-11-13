@@ -62,7 +62,7 @@ pub fn load_key(settings: &Settings) -> Result<Key> {
     Ok(key)
 }
 
-fn encode_key(key: &Key) -> Result<String> {
+pub fn encode_key(key: &Key) -> Result<String> {
     let mut buf = vec![];
     rmp::encode::write_array_len(&mut buf, key.len() as u32)
         .context("Failed to encode key to message pack")?;
