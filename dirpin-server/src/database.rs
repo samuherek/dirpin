@@ -295,7 +295,7 @@ impl Database {
     pub async fn get_session_user(&self, token: &str) -> Result<User, DbError> {
         sqlx::query_as(
             r#"
-            select * from users 
+            select users.* from users 
             left join sessions on sessions.user_id = users.id
             where sessions.token = ?1 and sessions.expires_at > strftime('%s', 'now')
         "#,

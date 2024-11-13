@@ -21,7 +21,7 @@ async fn sync_download(
     session: &str,
     key: &Key,
     from: OffsetDateTime,
-) -> Result<usize> {
+) -> Result<(usize, usize)> {
     let res = AuthClient::new(&settings.server_address, session)?
         .sync(from)
         .await?;
@@ -39,9 +39,6 @@ async fn sync_download(
         .map(|x| decrypt(x, key).expect("failed to decrypt entry. check key!"))
         .map(|x| (x.id.clone(), x))
         .collect();
-
-    debug!("local update count {}", local.len());
-    debug!("remote update download count {}", remote.len());
 
     let mut update_buf: Vec<Entry> = vec![];
     let mut conflict_buf: Vec<Entry> = vec![];
@@ -68,6 +65,9 @@ async fn sync_download(
         }
     }
 
+    let update_count = update_buf.len();
+    let mut delete_count = 0;
+
     let mut local: HashMap<Uuid, Entry> = db
         .list_deleted()
         .await?
@@ -81,12 +81,10 @@ async fn sync_download(
         .map(|x: EntryDelete| (x.id.clone(), x))
         .collect();
 
-    debug!("local remote count {}", local.len());
-    debug!("remote remote count {}", remote.len());
-
     // Collect deleted entries into update buffer or conflict buffer.
     for (id, r) in remote {
         if let Some(l) = local.get_mut(&id) {
+            delete_count += 1;
             // If either version or updated_at are higher locally, it means there is some conflict.
             if r.updated_at < l.updated_at || r.version < l.version {
                 l.deleted_at = Some(r.deleted_at);
@@ -110,7 +108,7 @@ async fn sync_download(
         std::process::exit(0);
     }
 
-    Ok(update_buf.len())
+    Ok((update_count, delete_count))
 }
 
 /// The assumptoin for the logic of this function is that this function always runs after the
@@ -130,13 +128,12 @@ async fn sync_upload(
 ) -> Result<usize> {
     // TODO: Split this into pages so that we don't have massive payload.
     let mut items = db.after(from).await?;
+    let update_count = items.len();
     let mut buffer = vec![];
 
     if !force {
         items.extend(db.deleted_after(from).await?);
     }
-
-    debug!("uploading count {}", items.len());
 
     for el in &items {
         let data = encrypt(el, key)?;
@@ -156,7 +153,7 @@ async fn sync_upload(
         .post_entries(&buffer)
         .await?;
 
-    Ok(buffer.len())
+    Ok(update_count)
 }
 
 /// 1. Download recent changes from remote using last_sync_timestamp.
@@ -186,12 +183,13 @@ pub async fn sync(settings: &Settings, db: &Database, force: bool) -> Result<()>
         from
     };
 
-    debug!("staring sync sesion from {from:?}");
+    let (download_count, delete_count) =
+        sync_download(settings, db, &session, &key, from.clone()).await?;
+    let upload_count = sync_upload(settings, db, &session, &key, from, force).await?;
 
-    let down_count = sync_download(settings, db, &session, &key, from.clone()).await?;
-    let up_count = sync_upload(settings, db, &session, &key, from, force).await?;
-
-    println!("Sync done. {up_count} Uploaded / {down_count} Downloaded");
+    println!(
+        "Sync done. {upload_count} Uploaded / {delete_count} Deleted / {download_count} Downloaded"
+    );
     Settings::save_last_sync()?;
     Ok(())
 }
