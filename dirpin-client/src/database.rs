@@ -318,12 +318,13 @@ impl Database {
 
     pub async fn after(&self, updated_at: OffsetDateTime) -> Result<Vec<Entry>> {
         debug!("Query entries before from datbase");
-        let res = sqlx::query_as("select * from entries where updated_at >= ?1")
-            .bind(updated_at.unix_timestamp_nanos() as i64)
-            .fetch(&self.pool)
-            .map_ok(|DbEntry(entry)| entry)
-            .try_collect()
-            .await?;
+        let res =
+            sqlx::query_as("select * from entries where updated_at >= ?1 and deleted_at is null")
+                .bind(updated_at.unix_timestamp_nanos() as i64)
+                .fetch(&self.pool)
+                .map_ok(|DbEntry(entry)| entry)
+                .try_collect()
+                .await?;
 
         Ok(res)
     }
