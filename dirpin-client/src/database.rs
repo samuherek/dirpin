@@ -266,7 +266,19 @@ impl Database {
         Ok(())
     }
 
-    pub async fn get_deleted(&self) -> Result<Vec<Entry>> {
+    pub async fn deleted_after(&self, deleted_at: OffsetDateTime) -> Result<Vec<Entry>> {
+        debug!("Query deleted before from datbase");
+        let res = sqlx::query_as("select * from entries where deleted_at >= ?1")
+            .bind(deleted_at.unix_timestamp())
+            .fetch(&self.pool)
+            .map_ok(|DbEntry(entry)| entry)
+            .try_collect()
+            .await?;
+
+        Ok(res)
+    }
+
+    pub async fn list_deleted(&self) -> Result<Vec<Entry>> {
         debug!("Query entries deleted datbase");
         let res = sqlx::query_as("select * from entries where deleted_at not null")
             .fetch(&self.pool)
@@ -279,7 +291,7 @@ impl Database {
 
     pub async fn after(&self, updated_at: OffsetDateTime) -> Result<Vec<Entry>> {
         debug!("Query entries before from datbase");
-        let res = sqlx::query_as("select * from entries where updated_at > ?1")
+        let res = sqlx::query_as("select * from entries where updated_at >= ?1")
             .bind(updated_at.unix_timestamp_nanos() as i64)
             .fetch(&self.pool)
             .map_ok(|DbEntry(entry)| entry)

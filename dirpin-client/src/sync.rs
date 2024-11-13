@@ -65,7 +65,7 @@ async fn sync_download(
     }
 
     let mut local: HashMap<Uuid, Entry> = db
-        .get_deleted()
+        .list_deleted()
         .await?
         .into_iter()
         .map(|x| (x.id.clone(), x))
@@ -128,9 +128,10 @@ async fn sync_upload(
 ) -> Result<usize> {
     // TODO: Split this into pages so that we don't have massive payload.
     let items = db.after(from).await?;
+    let deleted = db.deleted_after(from).await?;
     let mut buffer = vec![];
 
-    for el in &items {
+    for el in items.iter().chain(deleted.iter()) {
         let data = encrypt(el, key)?;
         let data = serde_json::to_string(&data)?;
 
