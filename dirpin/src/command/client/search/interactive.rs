@@ -562,18 +562,19 @@ impl<'a> std::fmt::Debug for AppState<'a> {
 
 impl AppState<'_> {
     async fn query_entry_list(&mut self) -> Result<()> {
-        let filter_mode = [self.entry_list.filter_mode.clone()];
+        let filter_mode = self.entry_list.filter_mode.clone();
         let search = self.prompt.get_search_input().unwrap_or("");
-        let data = self
-            .database
-            .list(&filter_mode, &self.entry_list.context, search)
-            .await?;
-        let context_count = self
-            .database
-            .count(&filter_mode, &self.entry_list.context, search)
-            .await?;
-        self.entry_list.set_data(data);
-        self.entry_list.set_count(context_count as i64);
+        todo!();
+        // let data = self
+        //     .database
+        //     .list(filter_mode.clone(), &self.entry_list.context, search)
+        //     .await?;
+        // let context_count = self
+        //     .database
+        //     .count(filter_mode, &self.entry_list.context, search)
+        //     .await?;
+        // self.entry_list.set_data(data);
+        // self.entry_list.set_count(context_count as i64);
 
         Ok(())
     }
@@ -970,9 +971,10 @@ impl AppState<'_> {
                 let context = match self.entry_list.filter_mode {
                     FilterMode::All => x.path.split("/").last().unwrap_or("N/A").to_string(),
                     FilterMode::Directory => "".to_string(),
-                    FilterMode::Workspace => {
-                        x.path.replace(&self.entry_list.context.path, "").to_string()
-                    }
+                    FilterMode::Workspace => x
+                        .path
+                        .replace(&self.entry_list.context.path, "")
+                        .to_string(),
                 };
                 Line::from(vec![
                     Span::styled(padd(x.kind.as_str(), 11), Style::new().fg(GRAY.c500)),

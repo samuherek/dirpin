@@ -393,14 +393,27 @@ impl Database {
 
     pub async fn list(
         &self,
-        filters: &[FilterMode],
+        filter: FilterMode,
         context: &Context,
+        workspace: Option<&Workspace>,
         search: &str,
     ) -> Result<Vec<Entry>> {
         let mut query = SqlBuilder::select_from("entries");
         query.field("*").order_desc("updated_at");
         query.and_where_is_null("deleted_at");
-        // todo!();
+
+        match filter {
+            FilterMode::All => &mut query,
+            FilterMode::Directory => query.and_where_eq("path", quote(&context.path)),
+            FilterMode::Workspace => {
+                if let Some(workspace) = workspace {
+                    query.and_where_eq("workspace_id", quote(workspace.id.to_string()))
+                } else {
+                    query.and_where_like_left("path", quote(&context.path))
+                }
+            }
+        };
+
         // for filter in filters {
         //     match filter {
         //         FilterMode::All => &mut query,

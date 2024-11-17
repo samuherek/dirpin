@@ -14,7 +14,10 @@ pub struct Cmd {
 impl Cmd {
     pub(crate) async fn run(self, settings: &Settings, db: &Database) -> Result<()> {
         let context = Context::cwd(settings);
-        let entries = db.list(&[FilterMode::Workspace], &context, "").await?;
+        let workspace = db.workspace(None, None, &context).await?;
+        let entries = db
+            .list(FilterMode::Workspace, &context, workspace.as_ref(), "")
+            .await?;
 
         for el in entries {
             println!("{}", el.value);
