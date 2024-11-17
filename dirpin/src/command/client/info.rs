@@ -23,7 +23,7 @@ pub fn run(settings: &Settings) {
     let config_dir = if let Ok(config_dir) = &env_config_dir {
         PathBuf::from(config_dir)
     } else {
-        dirpin_common::utils::config_dir()
+        Settings::config_dir()
     };
 
     let mut config_file = config_dir.clone();

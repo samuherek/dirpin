@@ -1,6 +1,7 @@
 use crate::api_client::AuthClient;
 use crate::database::Database;
-use crate::domain::{Entry, EntryDelete};
+use crate::domain::conflict::{Conflict, ConflictRef};
+use crate::domain::entry::{Entry, EntryDelete};
 use crate::encryption::{decrypt, encrypt, load_key};
 use crate::settings::Settings;
 use crypto_secretbox::Key;
@@ -8,7 +9,6 @@ use dirpin_common::api::AddEntryRequest;
 use eyre::Result;
 use std::collections::HashMap;
 use time::OffsetDateTime;
-use tracing::debug;
 use uuid::Uuid;
 
 /// Get the list of the updates (full data)
@@ -37,11 +37,11 @@ async fn sync_download(
         .iter()
         .map(|x| serde_json::from_str(x).expect("failed deserialize"))
         .map(|x| decrypt(x, key).expect("failed to decrypt entry. check key!"))
-        .map(|x| (x.id.clone(), x))
+        .map(|x: Entry| (x.id.clone(), x))
         .collect();
 
     let mut update_buf: Vec<Entry> = vec![];
-    let mut conflict_buf: Vec<Entry> = vec![];
+    let mut conflict_buf: Vec<Conflict> = vec![];
     let mut delete_buf: Vec<EntryDelete> = vec![];
 
     // Collect new versions into update buffer or conflict buffer.
@@ -58,7 +58,8 @@ async fn sync_download(
                 continue;
             // otherwise we have a conflict;
             } else {
-                conflict_buf.push(r);
+                let conflict = Conflict::try_from(&r)?;
+                conflict_buf.push(conflict);
             }
         } else {
             update_buf.push(r);
@@ -88,7 +89,7 @@ async fn sync_download(
             // If either version or updated_at are higher locally, it means there is some conflict.
             if r.updated_at < l.updated_at || r.version < l.version {
                 l.deleted_at = Some(r.deleted_at);
-                conflict_buf.push(l.clone());
+                conflict_buf.push(Conflict::try_from(&(*l))?);
                 continue;
             }
         }
@@ -142,7 +143,7 @@ async fn sync_upload(
         let p = AddEntryRequest {
             id: el.id.to_string(),
             data,
-            version: el.version,
+            version: el.version.inner(),
             updated_at: el.updated_at,
             deleted_at: el.deleted_at,
         };

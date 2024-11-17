@@ -2,8 +2,9 @@ use crate::tui;
 use crossterm::event::{
     Event as CrosstermEvent, EventStream, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
 };
-use dirpin_client::database::{Context, Database, FilterMode};
-use dirpin_client::domain::{Entry, EntryKind};
+use dirpin_client::database::{Database, FilterMode};
+use dirpin_client::domain::context::Context;
+use dirpin_client::domain::entry::{Entry, EntryKind};
 use dirpin_client::settings::Settings;
 use eyre::{Context as EyreContext, Result};
 use futures_util::stream::StreamExt;
@@ -589,7 +590,7 @@ impl AppState<'_> {
     async fn query_save(&mut self) -> Result<()> {
         match self.entry_list.list.selected_mut() {
             Some(item) => {
-                item.version += 1;
+                item.version.bump();
                 item.updated_at = OffsetDateTime::now_utc();
                 self.database.save(item).await?;
 
@@ -934,10 +935,10 @@ impl AppState<'_> {
         let formatted = padd(self.entry_list.filter_mode.as_str(), 9);
 
         let context_target = match self.entry_list.filter_mode {
-            FilterMode::All => &self.entry_list.context.hostname,
-            FilterMode::Directory => &self.entry_list.context.cwd,
+            FilterMode::All => self.entry_list.context.host_id.as_ref(),
+            FilterMode::Directory => &self.entry_list.context.path,
             FilterMode::Workspace => {
-                let value = self.entry_list.context.cgd.as_ref().map(|x| x.as_str());
+                let value = self.entry_list.context.git.as_ref().map(|x| x.as_str());
                 value.unwrap_or_else(|| "Not available")
             }
         };
@@ -967,15 +968,10 @@ impl AppState<'_> {
             .take(height)
             .map(|x| {
                 let context = match self.entry_list.filter_mode {
-                    FilterMode::All => x
-                        .cgd
-                        .as_ref()
-                        .map(|x| x.split("/").last().unwrap())
-                        .unwrap_or(&x.cwd)
-                        .to_string(),
+                    FilterMode::All => x.path.split("/").last().unwrap_or("N/A").to_string(),
                     FilterMode::Directory => "".to_string(),
                     FilterMode::Workspace => {
-                        x.cwd.replace(&self.entry_list.context.cwd, "").to_string()
+                        x.path.replace(&self.entry_list.context.path, "").to_string()
                     }
                 };
                 Line::from(vec![

@@ -1,4 +1,4 @@
-use crate::domain::HostId;
+use crate::domain::host::HostId;
 use config::builder::DefaultState;
 use config::{Config, ConfigBuilder, Environment, File as ConfigFile, FileFormat};
 use eyre::{eyre, Context, Result};
@@ -10,8 +10,8 @@ use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 
 const EXAMPLE_CONFIG: &str = include_str!("../config.toml");
-const HOST_ID_FILENAME: &str = "host_id";
-const LAST_SYNC_FILENAME: &str = "last_sync_time";
+const HOST_ID_FILENAME: &'static str = "host_id";
+const LAST_SYNC_FILENAME: &'static str = "last_sync_time";
 
 // TODO: Research if storing the session and the key is ok in the
 // files in the conifg. Maybe we need to use the OS secret storage?
@@ -25,7 +25,7 @@ pub struct Settings {
 
 impl Settings {
     fn read_from_data_dir(filename: &str) -> Option<String> {
-        let data_dir = dirpin_common::utils::data_dir();
+        let data_dir = data_dir();
         let path = data_dir.join(filename);
 
         if !path.exists() {
@@ -37,7 +37,7 @@ impl Settings {
     }
 
     fn save_to_data_dir(filename: &str, value: &str) -> Result<()> {
-        let data_dir = dirpin_common::utils::data_dir();
+        let data_dir = data_dir();
         let path = data_dir.join(filename);
         fs_err::write(path, value)?;
         Ok(())
@@ -65,11 +65,15 @@ impl Settings {
             let host_id = HostId::from_str(id.as_str()).expect("Failed to parse local host id");
             host_id
         } else {
-            let host_id = HostId::gen_host_id();
+            let host_id = HostId::get_host_id();
             Settings::save_to_data_dir(HOST_ID_FILENAME, host_id.as_ref())
                 .expect("Failed to write local host id");
             host_id
         }
+    }
+
+    pub fn config_dir() -> PathBuf {
+        config_dir()
     }
 
     // TODO Make the String into a SessionToken
@@ -85,13 +89,13 @@ impl Settings {
     }
 
     pub fn builder() -> Result<ConfigBuilder<DefaultState>> {
-        let data_dir = dirpin_common::utils::data_dir();
+        let data_dir = data_dir();
         let db_path = data_dir.join("entries.db");
         let key_path = data_dir.join("key");
         // TODO: make the sessions path and the host_id path consistent. They are kind of private
         // for the local computer but at the same time it would be nice to have on the settings.
         // However, we don't really want the user to overwrite it :|
-        // We should be able to overwrite it for dev purpose for testing 
+        // We should be able to overwrite it for dev purpose for testing
         let session_path = data_dir.join("session");
 
         Ok(Config::builder()
@@ -107,8 +111,8 @@ impl Settings {
     }
 
     pub fn new() -> Result<Self> {
-        let config_dir = dirpin_common::utils::config_dir();
-        let data_dir = dirpin_common::utils::data_dir();
+        let config_dir = config_dir();
+        let data_dir = data_dir();
 
         create_dir_all(&config_dir)
             .wrap_err_with(|| format!("Failed to create dir {config_dir:?}"))?;
@@ -152,4 +156,46 @@ impl Settings {
 
 fn expand_shell(value: &str) -> Result<String> {
     Ok(shellexpand::full(value)?.to_string())
+}
+
+#[cfg(not(targt_os = "windows"))]
+pub fn root_dir() -> PathBuf {
+    PathBuf::from("/")
+}
+
+#[cfg(target_os = "windows")]
+pub fn root_dir() -> PathBuf {
+    // TODO: On windows, you can have different root dirs.
+    // I should use something like: std::env::var("SystemDrive")
+    // But then the logic is different. As we assume there is only one global
+    // directory at this point. If anyone cares about this, we'll handle it then.
+    PathBuf::from("C:\\")
+}
+
+// TODO: this is duplicate code from the server settings. Possibly merge it inot a dirpin_common or
+// find a better way to use it with easier overwrite in the settings.
+#[cfg(not(target_os = "windows"))]
+pub fn home_dir() -> PathBuf {
+    let home = std::env::var("HOME").expect("Failed to find $HOME");
+    PathBuf::from(home)
+}
+
+#[cfg(target_os = "windows")]
+pub fn home_dir() -> PathBuf {
+    let home = std::env::var("USERPROFILE").expect("Failed to find %userprofile%");
+    PatBuf::from(home)
+}
+
+// Get the application configuration directory for the user config
+pub fn config_dir() -> PathBuf {
+    let config_dir =
+        std::env::var("XDG_CONFIG_HOME").map_or_else(|_| home_dir().join(".config"), PathBuf::from);
+    config_dir.join("dirpin")
+}
+
+/// Get the application data directory for internal data
+pub fn data_dir() -> PathBuf {
+    let data_dir = std::env::var("XDG_DATA_HOME")
+        .map_or_else(|_| home_dir().join(".local").join("share"), PathBuf::from);
+    data_dir.join("dirpin")
 }

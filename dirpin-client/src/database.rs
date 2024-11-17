@@ -1,5 +1,8 @@
-use crate::domain::{Entry, EntryDelete, EntryKind};
-use crate::utils::get_host_user;
+use crate::domain::conflict::Conflict;
+use crate::domain::context::Context;
+use crate::domain::entry::{Entry, EntryDelete, EntryKind};
+use crate::domain::host::HostId;
+use dirpin_common::domain::SyncVersion;
 use dirpin_common::utils;
 use eyre::Result;
 use futures_util::TryStreamExt;
@@ -24,24 +27,23 @@ impl<'r> FromRow<'r, SqliteRow> for DbEntry {
                 .try_get("id")
                 .map(|x: &str| Uuid::parse_str(x).unwrap())?,
             value: row.try_get("value")?,
+            desc: row.try_get("desc")?,
             data: row.try_get("data")?,
-            // TODO: fix this deserialization with the serde_json
             kind: row
                 .try_get("kind")
                 .map(|x: &str| EntryKind::from_str(x).unwrap())?,
-            hostname: row.try_get("hostname")?,
-            cwd: row.try_get("cwd")?,
-            cgd: row.try_get("cgd")?,
-            created_at: row
-                .try_get("created_at")
-                .map(|x: i64| OffsetDateTime::from_unix_timestamp(x).unwrap())?,
+            path: row.try_get("path")?,
             updated_at: row
                 .try_get("updated_at")
                 .map(|x: i64| OffsetDateTime::from_unix_timestamp_nanos(x as i128).unwrap())?,
             deleted_at: row
                 .try_get("deleted_at")
                 .map(|x: Option<i64>| x.map(|y| OffsetDateTime::from_unix_timestamp(y).unwrap()))?,
-            version: row.try_get("version")?,
+            version: row.try_get("version").map(|x: u32| SyncVersion::from(x))?,
+            workspace_id: row.try_get("workspace_id").map(|x: &str| x.parse().ok())?,
+            host_id: row
+                .try_get("host_id")
+                .map(|x: &str| HostId::from_str(x).unwrap())?,
         }))
     }
 }
@@ -61,35 +63,6 @@ impl FilterMode {
             FilterMode::Workspace => "workspace",
         }
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct Context {
-    pub cwd: String,
-    pub hostname: String,
-    pub cgd: Option<String>,
-}
-
-/// We assume that the global context is the root of the computer
-/// and we assume there is no "git repo" in the root of the computer
-/// TODO: Please check the "get_root_dir" impl for comment about the
-/// widnows root dir.
-pub fn global_context() -> Context {
-    let hostname = get_host_user();
-    let cwd = utils::get_rooot_dir();
-    Context {
-        cwd,
-        hostname,
-        cgd: None,
-    }
-}
-
-/// Get the current entry context basd on the current directory path
-pub fn current_context() -> Context {
-    let hostname = get_host_user();
-    let cwd = utils::get_current_dir();
-    let cgd = utils::get_git_parent_dir(&cwd);
-    Context { cwd, hostname, cgd }
 }
 
 pub struct Database {
@@ -125,34 +98,34 @@ impl Database {
         sqlx::query(
             r#"
             insert into entries(
-                id, value, data, kind, hostname, cwd, cgd, created_at, updated_at, deleted_at, version
+                id, value, desc, data, kind, path, updated_at, deleted_at, version, workspace_id, host_id
             ) values(
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11
             )
             on conflict(id) do update set
                 value = ?2,
-                data = ?3,
-                kind = ?4,
-                hostname = ?5,
-                cwd = ?6,
-                cgd = ?7,
-                created_at = ?8,
-                updated_at = ?9,
-                deleted_at = ?10,
-                version = ?11
+                desc = ?3,
+                data = ?4,
+                kind = ?5,
+                path = ?6,
+                updated_at = ?7,
+                deleted_at = ?8,
+                version = ?9,
+                workspace_id = ?10,
+                host_id = ?11
             "#,
         )
             .bind(v.id.to_string())
             .bind(v.value.as_str())
+            .bind(v.desc.to_owned())
             .bind(v.data.to_owned())
             .bind(v.kind.as_str())
-            .bind(v.hostname.as_str())
-            .bind(v.cwd.as_str())
-            .bind(v.cgd.to_owned())
-            .bind(v.created_at.unix_timestamp())
+            .bind(v.path.as_str())
             .bind(v.updated_at.unix_timestamp_nanos() as i64)
             .bind(v.deleted_at.map(|x| x.unix_timestamp()))
-            .bind(v.version)
+            .bind(v.version.inner())
+            .bind(v.workspace_id.as_ref().map(|x| x.to_string()))
+            .bind(v.host_id.to_string())
         .execute(&mut **tx)
         .await?;
 
@@ -182,46 +155,31 @@ impl Database {
 
     async fn save_conflict_tx(
         tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        v: &Entry,
+        v: &Conflict,
     ) -> Result<()> {
         sqlx::query(
             r#"
             insert into conflicts(
-                id, value, data, kind, hostname, cwd, cgd, created_at, updated_at, deleted_at, version
+                ref_id, ref_kind, data
             ) values(
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11
+                ?1, ?2, ?3
             )
-            on conflict(id) do update set
-                value = ?2,
+            on conflict(ref_id) do update set
+                ref_id = ?1,
+                ref_kind = ?2,
                 data = ?3,
-                kind = ?4,
-                hostname = ?5,
-                cwd = ?6,
-                cgd = ?7,
-                created_at = ?8,
-                updated_at = ?9,
-                deleted_at = ?10,
-                version = ?11
             "#,
         )
-            .bind(v.id.to_string())
-            .bind(v.value.as_str())
-            .bind(v.data.to_owned())
-            .bind(v.kind.as_str())
-            .bind(v.hostname.as_str())
-            .bind(v.cwd.as_str())
-            .bind(v.cgd.to_owned())
-            .bind(v.created_at.unix_timestamp())
-            .bind(v.updated_at.unix_timestamp_nanos() as i64)
-            .bind(v.deleted_at.map(|x| x.unix_timestamp()))
-            .bind(v.version)
+        .bind(v.ref_id.to_string())
+        .bind(v.ref_kind.to_string())
+        .bind(v.data.to_owned())
         .execute(&mut **tx)
         .await?;
 
         Ok(())
     }
 
-    pub async fn save_conflicts_bulk(&self, items: &[Entry]) -> Result<()> {
+    pub async fn save_conflicts_bulk(&self, items: &[Conflict]) -> Result<()> {
         debug!("Saving conflicts in bulk to database");
         let mut tx = self.pool.begin().await?;
         for el in items {
@@ -239,33 +197,34 @@ impl Database {
         sqlx::query(
             r#"
             insert into entries(
-                id, value, data, kind, hostname, cwd, created_at, updated_at, deleted_at, version
+                id, value, desc, data, kind, path, updated_at, deleted_at, version, workspace_id, host_id
             ) values(
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11
             )
             on conflict(id) do update set
                 value = ?2,
-                data = ?3,
-                kind = ?4,
-                hostname = ?5,
-                cwd = ?6,
-                created_at = ?7,
-                updated_at = ?8,
-                deleted_at = ?9,
-                version = ?10
+                desc = ?3,
+                data = ?4,
+                kind = ?5,
+                path = ?6,
+                updated_at = ?7,
+                deleted_at = ?8,
+                version = ?9,
+                workspace_id = ?10,
+                host_id = ?11
             "#,
         )
         .bind(v.id.to_string())
         .bind("")
         .bind("")
+        .bind("")
         .bind(EntryKind::Note.to_string())
         .bind("")
-        .bind("")
-        .bind(OffsetDateTime::now_utc().unix_timestamp())
         .bind(v.updated_at.unix_timestamp_nanos() as i64)
         .bind(v.deleted_at.unix_timestamp())
-        .bind(v.version)
-        .bind(OffsetDateTime::now_utc().unix_timestamp())
+        .bind(v.version.inner())
+        .bind(None::<String>)
+        .bind("")
         .execute(&mut **tx)
         .await?;
 
@@ -338,21 +297,22 @@ impl Database {
         let mut query = SqlBuilder::select_from("entries");
         query.field("*").order_desc("updated_at");
         query.and_where_is_null("deleted_at");
-        for filter in filters {
-            match filter {
-                FilterMode::All => &mut query,
-                FilterMode::Directory => query.and_where_eq("cwd", quote(&context.cwd)),
-                FilterMode::Workspace => query.and_where_eq(
-                    "cgd",
-                    quote(
-                        context
-                            .cgd
-                            .as_ref()
-                            .unwrap_or(&"XXXXXXXXXXXXXX".to_string()),
-                    ),
-                ),
-            };
-        }
+        // todo!();
+        // for filter in filters {
+        //     match filter {
+        //         FilterMode::All => &mut query,
+        //         FilterMode::Directory => query.and_where_eq("cwd", quote(&context.cwd)),
+        //         FilterMode::Workspace => query.and_where_eq(
+        //             "cgd",
+        //             quote(
+        //                 context
+        //                     .cgd
+        //                     .as_ref()
+        //                     .unwrap_or(&"XXXXXXXXXXXXXX".to_string()),
+        //             ),
+        //         ),
+        //     };
+        // }
 
         if !search.is_empty() {
             query.and_where_like_any("value", search);
@@ -377,21 +337,22 @@ impl Database {
         let mut query = SqlBuilder::select_from("entries");
         query.field("count(1)");
         query.and_where_is_null("deleted_at");
-        for filter in filters {
-            match filter {
-                FilterMode::All => &mut query,
-                FilterMode::Directory => query.and_where_eq("cwd", quote(&context.cwd)),
-                FilterMode::Workspace => query.and_where_eq(
-                    "cgd",
-                    quote(
-                        context
-                            .cgd
-                            .as_ref()
-                            .unwrap_or(&"XXXXXXXXXXXXXX".to_string()),
-                    ),
-                ),
-            };
-        }
+        // todo!();
+        // for filter in filters {
+        //     match filter {
+        //         FilterMode::All => &mut query,
+        //         FilterMode::Directory => query.and_where_eq("cwd", quote(&context.cwd)),
+        //         FilterMode::Workspace => query.and_where_eq(
+        //             "cgd",
+        //             quote(
+        //                 context
+        //                     .cgd
+        //                     .as_ref()
+        //                     .unwrap_or(&"XXXXXXXXXXXXXX".to_string()),
+        //             ),
+        //         ),
+        //     };
+        // }
 
         if !search.is_empty() {
             query.and_where_like_any("value", search);

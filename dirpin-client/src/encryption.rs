@@ -1,4 +1,3 @@
-use crate::domain::{Entry, EntryKind};
 use crate::settings::Settings;
 use base64::prelude::{Engine, BASE64_STANDARD};
 use crypto_secretbox::aead::{AeadCore, AeadInPlace, Nonce, OsRng};
@@ -8,22 +7,14 @@ use fs_err as fs;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
-use time::format_description::well_known::Rfc3339;
-use time::OffsetDateTime;
-use uuid::Uuid;
-
-// type Nonce = GenericArray<u8, U24>;
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub struct EncryptedEntry {
+pub struct EncryptedItem {
     pub ciphertext: Vec<u8>,
     pub key: Vec<u8>,
     pub key_nonce: Nonce<XSalsa20Poly1305>,
     pub nonce: Nonce<XSalsa20Poly1305>,
 }
-
-#[derive(Debug)]
-pub struct DecryptedEntry {}
 
 pub fn generate_encoded_key() -> Result<(Key, String)> {
     let key = XSalsa20Poly1305::generate_key(&mut OsRng);
@@ -92,118 +83,17 @@ pub fn decode_key(key: String) -> Result<Key> {
     Ok(key)
 }
 
-const ENTRY_FIELD_LEN: u32 = 11;
-
-pub fn encode_to_msgpack(entry: &Entry) -> Result<Vec<u8>> {
-    use rmp::encode;
-
-    let mut output = Vec::new();
-    encode::write_array_len(&mut output, ENTRY_FIELD_LEN)?;
-
-    encode::write_str(&mut output, &entry.id.to_string())?;
-    encode::write_str(&mut output, &entry.value)?;
-    match &entry.data {
-        Some(v) => encode::write_str(&mut output, &v)?,
-        None => encode::write_nil(&mut output)?,
-    }
-    // TODO: fix the kind stuff. Implement &to_str
-    encode::write_str(&mut output, &"note")?;
-    encode::write_str(&mut output, &entry.hostname)?;
-    encode::write_str(&mut output, &entry.cwd)?;
-    match &entry.cgd {
-        Some(v) => encode::write_str(&mut output, &v)?,
-        None => encode::write_nil(&mut output)?,
-    }
-    encode::write_str(&mut output, &entry.created_at.format(&Rfc3339)?)?;
-    encode::write_str(&mut output, &entry.updated_at.format(&Rfc3339)?)?;
-    encode::write_u32(&mut output, entry.version)?;
-    match entry.deleted_at {
-        Some(v) => encode::write_str(&mut output, &v.format(&Rfc3339)?)?,
-        None => encode::write_nil(&mut output)?,
-    }
-
-    Ok(output)
+pub trait MsgPackSerializable: Sized {
+    fn encode_msgpack(&self) -> Result<Vec<u8>>;
+    fn decode_msgpack(input: &[u8]) -> Result<Self>;
 }
 
-fn rmp_error_report<E: std::fmt::Debug>(err: E) -> eyre::Report {
+pub fn rmp_error_report<E: std::fmt::Debug>(err: E) -> eyre::Report {
     eyre!("{err:?}")
 }
 
-pub fn decode_from_msgpack(bytes: &[u8]) -> Result<Entry> {
-    use rmp::decode;
-    use rmp::decode::{Bytes, DecodeStringError};
-    use rmp::Marker;
-
-    let mut bytes = Bytes::new(bytes);
-    let len = decode::read_array_len(&mut bytes).map_err(rmp_error_report)?;
-
-    if len != ENTRY_FIELD_LEN {
-        bail!("incorrectly formed decrypted entry object");
-    }
-
-    let bytes = bytes.remaining_slice();
-    let (id, bytes) = decode::read_str_from_slice(bytes).map_err(rmp_error_report)?;
-    let (value, bytes) = decode::read_str_from_slice(bytes).map_err(rmp_error_report)?;
-    let (data, bytes) = match decode::read_str_from_slice(bytes) {
-        Ok((value, bytes)) => (Some(value), bytes),
-        Err(DecodeStringError::TypeMismatch(Marker::Null)) => {
-            let mut rest = bytes;
-            decode::read_nil(&mut rest).map_err(rmp_error_report)?;
-            (None, rest)
-        }
-        Err(e) => return Err(rmp_error_report(e)),
-    };
-    let (_kind, bytes) = decode::read_str_from_slice(bytes).map_err(rmp_error_report)?;
-    let (hostname, bytes) = decode::read_str_from_slice(bytes).map_err(rmp_error_report)?;
-    let (cwd, bytes) = decode::read_str_from_slice(bytes).map_err(rmp_error_report)?;
-    let (cgd, bytes) = match decode::read_str_from_slice(bytes) {
-        Ok((value, bytes)) => (Some(value), bytes),
-        Err(DecodeStringError::TypeMismatch(Marker::Null)) => {
-            let mut rest = bytes;
-            decode::read_nil(&mut rest).map_err(rmp_error_report)?;
-            (None, rest)
-        }
-        Err(e) => return Err(rmp_error_report(e)),
-    };
-    let (created_at, bytes) = decode::read_str_from_slice(bytes).map_err(rmp_error_report)?;
-    let (updated_at, bytes) = decode::read_str_from_slice(bytes).map_err(rmp_error_report)?;
-    let mut bytes = Bytes::new(bytes);
-    let version = decode::read_u32(&mut bytes).map_err(rmp_error_report)?;
-    let bytes = bytes.remaining_slice();
-    let (deleted_at, bytes) = match decode::read_str_from_slice(bytes) {
-        Ok((value, bytes)) => (Some(value), bytes),
-        Err(DecodeStringError::TypeMismatch(Marker::Null)) => {
-            let mut rest = bytes;
-            decode::read_nil(&mut rest).map_err(rmp_error_report)?;
-            (None, rest)
-        }
-        Err(e) => return Err(rmp_error_report(e)),
-    };
-
-    if !bytes.is_empty() {
-        bail!("found more bytes than expected. malformed")
-    }
-
-    Ok(Entry {
-        id: Uuid::parse_str(id)?,
-        value: value.to_owned(),
-        data: data.map(|x| x.to_string()),
-        // TODO: do the serde_json::from_str() for the kind
-        kind: EntryKind::Note,
-        hostname: hostname.to_owned(),
-        cwd: cwd.to_owned(),
-        cgd: cgd.map(|x| x.to_owned()),
-        version,
-        created_at: OffsetDateTime::parse(created_at, &Rfc3339)?,
-        updated_at: OffsetDateTime::parse(updated_at, &Rfc3339)?,
-        deleted_at: deleted_at
-            .map(|x| OffsetDateTime::parse(x, &Rfc3339))
-            .transpose()?,
-    })
-}
-
-pub fn encrypt(entry: &Entry, key: &Key) -> Result<EncryptedEntry> {
-    let mut entry_buf = encode_to_msgpack(entry)?;
+pub fn encrypt<T: MsgPackSerializable>(entry: &T, key: &Key) -> Result<EncryptedItem> {
+    let mut entry_buf = entry.encode_msgpack()?;
 
     let one_time_key = XSalsa20Poly1305::generate_key(&mut OsRng);
     let one_time_key_nonce = XSalsa20Poly1305::generate_nonce(&mut OsRng);
@@ -217,7 +107,7 @@ pub fn encrypt(entry: &Entry, key: &Key) -> Result<EncryptedEntry> {
         .encrypt_in_place(&primary_key_nonce, &[], &mut encrypted_key)
         .map_err(|_| eyre!("Failed to encrypt key"))?;
 
-    Ok(EncryptedEntry {
+    Ok(EncryptedItem {
         ciphertext: entry_buf,
         key: encrypted_key,
         key_nonce: one_time_key_nonce,
@@ -225,7 +115,7 @@ pub fn encrypt(entry: &Entry, key: &Key) -> Result<EncryptedEntry> {
     })
 }
 
-pub fn decrypt(encrypted_data: EncryptedEntry, key: &Key) -> Result<Entry> {
+pub fn decrypt<T: MsgPackSerializable>(encrypted_data: EncryptedItem, key: &Key) -> Result<T> {
     let mut one_time_key = encrypted_data.key;
     XSalsa20Poly1305::new(&key)
         .decrypt_in_place(&encrypted_data.nonce, &[], &mut one_time_key)
@@ -237,7 +127,7 @@ pub fn decrypt(encrypted_data: EncryptedEntry, key: &Key) -> Result<Entry> {
         .decrypt_in_place(&encrypted_data.key_nonce, &[], &mut entry)
         .map_err(|_| eyre!("Failed to decrypt data"))?;
 
-    let entry = decode_from_msgpack(&entry)?;
+    let entry = T::decode_msgpack(&entry)?;
 
     Ok(entry)
 }

@@ -15,8 +15,7 @@ pub struct Settings {
 
 impl Settings {
     pub fn new() -> Result<Self, Error> {
-        let config_dir = std::env::var("DIRPIN_CONFIG_DIR")
-            .map_or(dirpin_common::utils::config_dir(), PathBuf::from);
+        let config_dir = std::env::var("DIRPIN_CONFIG_DIR").map_or(config_dir(), PathBuf::from);
         let db_path = config_dir.join("server.db");
 
         let mut config_builder = Config::builder()
@@ -49,4 +48,25 @@ impl Settings {
 
         Ok(settings)
     }
+}
+
+// TODO: this is duplicate code from the client settings. Possibly merge it inot a dirpin_common or
+// find a better way to use it with easier overwrite in the settings.
+#[cfg(not(target_os = "windows"))]
+pub fn home_dir() -> PathBuf {
+    let home = std::env::var("HOME").expect("Failed to find $HOME");
+    PathBuf::from(home)
+}
+
+#[cfg(target_os = "windows")]
+pub fn home_dir() -> PathBuf {
+    let home = std::env::var("USERPROFILE").expect("Failed to find %userprofile%");
+    PatBuf::from(home)
+}
+
+// Get the application configuration directory for the user config
+pub fn config_dir() -> PathBuf {
+    let config_dir =
+        std::env::var("XDG_CONFIG_HOME").map_or_else(|_| home_dir().join(".config"), PathBuf::from);
+    config_dir.join("dirpin")
 }

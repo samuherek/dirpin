@@ -1,5 +1,6 @@
 use clap::Parser;
-use dirpin_client::database::{current_context, Database, FilterMode};
+use dirpin_client::database::{Database, FilterMode};
+use dirpin_client::domain::context::Context;
 use dirpin_client::settings::Settings;
 use eyre::Result;
 
@@ -11,13 +12,12 @@ pub struct Cmd {
 }
 
 impl Cmd {
-    pub(crate) async fn run(self, _settings: &Settings, db: &Database) -> Result<()> {
-        let context = current_context();
+    pub(crate) async fn run(self, settings: &Settings, db: &Database) -> Result<()> {
+        let context = Context::cwd(settings);
         let entries = db.list(&[FilterMode::Workspace], &context, "").await?;
 
         for el in entries {
-            let (_, user) = el.hostname.split_once(":").unwrap();
-            println!("{}:: {}", user, el.value);
+            println!("{}", el.value);
         }
 
         Ok(())

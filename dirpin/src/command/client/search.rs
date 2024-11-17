@@ -1,5 +1,6 @@
 use clap::Parser;
-use dirpin_client::database::{current_context, Database};
+use dirpin_client::database::Database;
+use dirpin_client::domain::context::Context;
 use dirpin_client::settings::Settings;
 use eyre::Result;
 
@@ -11,7 +12,7 @@ pub struct Cmd {}
 
 impl Cmd {
     pub(crate) async fn run(self, settings: &Settings, database: &Database) -> Result<()> {
-        let context = current_context();
+        let context = Context::cwd(settings);
         interactive::run(settings, database, &context).await?;
 
         Ok(())

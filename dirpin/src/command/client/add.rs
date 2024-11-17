@@ -1,9 +1,10 @@
 use clap::Parser;
-use dirpin_client::database::{current_context, global_context, Database};
-use dirpin_client::domain::{Entry, EntryKind};
+use dirpin_client::database::Database;
+use dirpin_client::domain::context::Context;
+use dirpin_client::domain::entry::{Entry, EntryKind};
 use dirpin_client::settings::Settings;
 use dirpin_common::utils;
-use eyre::{bail, Context, Result};
+use eyre::{bail, Context as Ctx, Result};
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -21,9 +22,9 @@ pub struct Cmd {
 impl Cmd {
     pub async fn run(self, settings: &Settings, db: &Database) -> Result<()> {
         let context = if self.global {
-            global_context()
+            Context::global(settings)
         } else {
-            current_context()
+            Context::cwd(settings)
         };
         let db_path = PathBuf::from(&settings.db_path);
 
@@ -41,7 +42,7 @@ impl Cmd {
             bail!("No input provided. Please run '--help' to see instructions.");
         };
 
-        let mut entry = Entry::new(input, context.hostname, context.cwd, context.cgd);
+        let mut entry = Entry::new(input, &context);
 
         if let Some(kind) = self.kind.map(|x| EntryKind::from_str(&x).unwrap()) {
             entry = entry.kind(kind);
