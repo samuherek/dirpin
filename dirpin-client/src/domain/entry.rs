@@ -68,7 +68,12 @@ pub struct Entry {
 impl Entry {
     const FIELD_LEN: u32 = 11;
 
-    pub fn new(value: String, context: &Context) -> Self {
+    pub fn new(
+        value: String, 
+        path: String,
+        workspace_id: Option<WorkspaceId>,
+        host_id: HostId
+        ) -> Self {
         let id = Uuid::now_v7();
         let updated_at = OffsetDateTime::now_utc();
         Self {
@@ -80,9 +85,9 @@ impl Entry {
             updated_at,
             deleted_at: None,
             version: SyncVersion::new(),
-            path: context.path.clone(),
-            workspace_id: context.workspace_id.clone(),
-            host_id: context.host_id.clone(),
+            path,
+            workspace_id,
+            host_id,
         }
     }
 

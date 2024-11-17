@@ -2,8 +2,8 @@ use crate::domain::conflict::Conflict;
 use crate::domain::context::Context;
 use crate::domain::entry::{Entry, EntryDelete, EntryKind};
 use crate::domain::host::HostId;
+use crate::domain::workspace::{Workspace, WorkspaceId, WorkspacePath};
 use dirpin_common::domain::SyncVersion;
-use dirpin_common::utils;
 use eyre::Result;
 use futures_util::TryStreamExt;
 use sql_builder::{quote, SqlBuilder};
@@ -19,6 +19,7 @@ use uuid::Uuid;
 // expires_at/created_at/deleted_at -> unix timestamp
 
 pub struct DbEntry(pub Entry);
+pub struct DbWorkspace(pub Workspace);
 
 impl<'r> FromRow<'r, SqliteRow> for DbEntry {
     fn from_row(row: &'r SqliteRow) -> sqlx::Result<Self> {
@@ -44,6 +45,30 @@ impl<'r> FromRow<'r, SqliteRow> for DbEntry {
             host_id: row
                 .try_get("host_id")
                 .map(|x: &str| HostId::from_str(x).unwrap())?,
+        }))
+    }
+}
+
+impl<'r> FromRow<'r, SqliteRow> for DbWorkspace {
+    fn from_row(row: &'r SqliteRow) -> sqlx::Result<Self> {
+        Ok(Self(Workspace {
+            id: row.try_get("id").map(|x: &str| x.parse().unwrap())?,
+            name: row.try_get("name")?,
+            git: row.try_get("git")?,
+            paths: row.try_get("paths").map(|x: &str| {
+                // TODO: theoretically, there can be a "," in a path that would fail to correctly
+                // deserialize the path from the list.
+                x.split(",")
+                    .map(|y| WorkspacePath::try_from(y).unwrap())
+                    .collect()
+            })?,
+            updated_at: row
+                .try_get("updated_at")
+                .map(|x: i64| OffsetDateTime::from_unix_timestamp_nanos(x as i128).unwrap())?,
+            deleted_at: row
+                .try_get("deleted_at")
+                .map(|x: Option<i64>| x.map(|y| OffsetDateTime::from_unix_timestamp(y).unwrap()))?,
+            version: row.try_get("version").map(|x: u32| SyncVersion::from(x))?,
         }))
     }
 }
@@ -149,6 +174,84 @@ impl Database {
             Self::save_tx(&mut tx, &el).await?;
         }
         tx.commit().await?;
+
+        Ok(())
+    }
+
+    pub async fn workspace(
+        &self,
+        workspace_id: Option<WorkspaceId>,
+        workspace_name: Option<String>,
+        context: &Context,
+    ) -> Result<Option<Workspace>> {
+        debug!("Get workspace from database");
+        let mut query = SqlBuilder::select_from("workspaces");
+        query.field("*");
+        query.and_where_is_null("deleted_at");
+
+        let host_path =
+            WorkspacePath::new(context.host_id.clone(), context.path.clone()).to_string();
+        query.and_where_like_any("paths", host_path);
+
+        match workspace_id {
+            Some(id) => query.and_where_eq("id", id.to_string()),
+            None => &mut query,
+        };
+
+        match &context.git {
+            Some(git) => query.and_where_eq("git", quote(git)),
+            None => &mut query,
+        };
+
+        match workspace_name {
+            Some(name) => query.and_where_eq("name", quote(name.to_string())),
+            None => &mut query,
+        };
+
+        let query = query.sql().expect("Failed to parse query");
+        let res = sqlx::query_as(&query)
+            .fetch_optional(&self.pool)
+            .await?
+            .map(|DbWorkspace(ws)| ws);
+
+        Ok(res)
+    }
+
+    pub async fn save_workspace(&self, v: &Workspace) -> Result<()> {
+        debug!("Saving workspace in database");
+        sqlx::query(
+            r#"
+            insert into workspaces(
+                id, name, git, paths, updated_at, deleted_at, version
+            )
+            values(
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7
+            ) 
+            on conflict(id) do update set 
+                id = ?1,
+                name = ?2,
+                git = ?3,
+                paths = ?4,
+                updated_at = ?5,
+                deleted_at = ?6,
+                version = ?7
+            "#,
+        )
+        .bind(v.id.to_string())
+        .bind(v.name.as_str())
+        .bind(v.git.as_ref().map(|x| x.as_str()))
+        .bind(
+            v.paths
+                .iter()
+                .map(|x| x.to_string())
+                .collect::<Vec<_>>()
+                .join(","),
+        )
+        .bind(v.updated_at.unix_timestamp_nanos() as i64)
+        .bind(v.deleted_at.map(|x| x.unix_timestamp()))
+        .bind(v.version.inner())
+        .execute(&self.pool)
+        .await?;
 
         Ok(())
     }
