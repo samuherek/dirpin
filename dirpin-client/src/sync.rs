@@ -21,7 +21,7 @@ trait HasSyncProperties {
 
     fn updated_at(&self) -> &Self::Timestamp;
     fn version(&self) -> &Self::Version;
-    fn deleted_at(&self) -> Option<&Self::Timestamp>;
+    // fn deleted_at(&self) -> Option<&Self::Timestamp>;
     fn set_deleted_at(&mut self, deleted_at: Self::Timestamp);
 }
 
@@ -37,9 +37,9 @@ impl HasSyncProperties for Workspace {
         &self.version
     }
 
-    fn deleted_at(&self) -> Option<&Self::Timestamp> {
-        self.deleted_at.as_ref()
-    }
+    // fn deleted_at(&self) -> Option<&Self::Timestamp> {
+    //     self.deleted_at.as_ref()
+    // }
 
     fn set_deleted_at(&mut self, deleted_at: Self::Timestamp) {
         self.deleted_at = Some(deleted_at);
@@ -58,9 +58,9 @@ impl HasSyncProperties for Entry {
         &self.version
     }
 
-    fn deleted_at(&self) -> Option<&Self::Timestamp> {
-        self.deleted_at.as_ref()
-    }
+    // fn deleted_at(&self) -> Option<&Self::Timestamp> {
+    //     self.deleted_at.as_ref()
+    // }
 
     fn set_deleted_at(&mut self, deleted_at: Self::Timestamp) {
         self.deleted_at = Some(deleted_at);
@@ -79,9 +79,9 @@ impl HasSyncProperties for RefDelete {
         &self.version
     }
 
-    fn deleted_at(&self) -> Option<&Self::Timestamp> {
-        Some(&self.deleted_at)
-    }
+    // fn deleted_at(&self) -> Option<&Self::Timestamp> {
+    //     Some(&self.deleted_at)
+    // }
 
     fn set_deleted_at(&mut self, _deleted_at: Self::Timestamp) {
         unreachable!()
@@ -274,7 +274,7 @@ where
     Ok(())
 }
 
-struct SyncStatus {
+struct DownloadStatus {
     workspace_delets: usize,
     workspace_updates: usize,
     entry_delets: usize,
@@ -291,7 +291,7 @@ async fn sync_download(
     session: &str,
     key: &Key,
     from: OffsetDateTime,
-) -> Result<SyncStatus> {
+) -> Result<DownloadStatus> {
     let res = AuthClient::new(&settings.server_address, session)?
         .sync(from)
         .await?;
@@ -359,12 +359,17 @@ async fn sync_download(
         std::process::exit(0);
     }
 
-    Ok(SyncStatus {
+    Ok(DownloadStatus {
         workspace_updates: update_workspaces.len(),
         workspace_delets: delete_workspaces.len(),
         entry_updates: update_entries.len(),
         entry_delets: delete_entries.len(),
     })
+}
+
+struct UploadStatus {
+    entries: usize,
+    workspaces: usize,
 }
 
 /// The assumptoin for the logic of this function is that this function always runs after the
@@ -373,61 +378,54 @@ async fn sync_download(
 /// conflicts before we hit this function. This means, that if the sync takes way too long and
 /// there is a new update on the server, we will first check it before we upload.
 /// Meaining, even if new values are in remote, we still download them first.
-/// This is not buletproof, as there is a time in the
+/// This is not buletproof, as there is a time in-between that can create new values from a
+/// different host. However, we'll use a periodic doctor to spot this.
 async fn sync_upload(
     settings: &Settings,
     db: &Database,
     session: &str,
     key: &Key,
     from: OffsetDateTime,
-    force: bool,
-) -> Result<usize> {
+) -> Result<UploadStatus> {
     // TODO: Split this into pages so that we don't have massive payload.
-    let mut entries = db.after(from).await?;
     let mut workspaces = db.after_workspaces(from).await?;
-    let update_count = entries.len();
+    workspaces.extend(db.deleted_after_workspaces(from).await?);
+
+    let mut entries = db.after(from).await?;
+    entries.extend(db.deleted_after(from).await?);
+
     let mut buffer = vec![];
 
-    if !force {
-        entries.extend(db.deleted_after(from).await?);
-        workspaces.extend(db.deleted_after_workspaces(from).await?);
-    }
-
     for entry in &entries {
-        let data = encrypt(entry, key)?;
-        let data = data.to_json_base64()?;
-
-        let p = AddEntryRequest {
+        buffer.push(AddEntryRequest {
             id: entry.id.to_string(),
-            data,
+            data: encrypt(entry, key)?.to_json_base64()?,
             kind: "entry".into(),
             version: entry.version.inner(),
             updated_at: entry.updated_at,
             deleted_at: entry.deleted_at,
-        };
-        buffer.push(p);
+        });
     }
 
     for ws in &workspaces {
-        let data = encrypt(ws, key)?;
-        let data = data.to_json_base64()?;
-
-        let p = AddEntryRequest {
+        buffer.push(AddEntryRequest {
             id: ws.id.to_string(),
-            data,
+            data: encrypt(ws, key)?.to_json_base64()?,
             kind: "workspace".into(),
             version: ws.version.inner(),
             updated_at: ws.updated_at,
             deleted_at: ws.deleted_at,
-        };
-        buffer.push(p);
+        });
     }
 
     AuthClient::new(&settings.server_address, session)?
         .post_entries(&buffer)
         .await?;
 
-    Ok(update_count)
+    Ok(UploadStatus {
+        entries: entries.len(),
+        workspaces: workspaces.len(),
+    })
 }
 
 /// 1. Download recent changes from remote using last_sync_timestamp.
@@ -457,17 +455,18 @@ pub async fn sync(settings: &Settings, db: &Database, force: bool) -> Result<()>
         from
     };
 
-    let status = sync_download(settings, db, &session, &key, from.clone()).await?;
-    let upload_count = sync_upload(settings, db, &session, &key, from, force).await?;
+    let down_status = sync_download(settings, db, &session, &key, from.clone()).await?;
+    let up_status = sync_upload(settings, db, &session, &key, from).await?;
 
     println!(
         "Workspaces: {} Uploaded / {} Deleted / {} Downloaded",
-        0, status.workspace_delets, status.workspace_updates
+        up_status.workspaces, down_status.workspace_delets, down_status.workspace_updates
     );
     println!(
         "Entries: {} Uploaded / {} Deleted / {} Downloaded",
-        0, status.entry_delets, status.entry_updates
+        up_status.entries, down_status.entry_delets, down_status.entry_updates
     );
     Settings::save_last_sync()?;
+
     Ok(())
 }
