@@ -1,4 +1,5 @@
 use crate::domain::entry::Entry;
+use crate::domain::workspace::Workspace;
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -34,6 +35,12 @@ impl std::fmt::Display for ConflictRef {
     }
 }
 
+pub trait HasId {
+    fn id(&self) -> &Uuid;
+}
+
+
+
 pub struct Conflict {
     pub ref_id: Uuid,
     pub ref_kind: ConflictRef,
@@ -41,13 +48,13 @@ pub struct Conflict {
     pub data: String,
 }
 
-impl TryFrom<&Entry> for Conflict {
-    type Error = serde_json::Error;
-
-    fn try_from(value: &Entry) -> Result<Self, Self::Error> {
+impl Conflict {
+    pub fn from_serializable<T: serde::Serialize + HasId>(
+        value: &T,
+    ) -> Result<Self, serde_json::Error> {
         let data = serde_json::to_string(value)?;
         Ok(Self {
-            ref_id: value.id,
+            ref_id: value.id().clone(),
             ref_kind: ConflictRef::Entry,
             data,
         })

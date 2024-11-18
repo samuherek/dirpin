@@ -1,15 +1,285 @@
 use crate::api_client::AuthClient;
 use crate::database::Database;
-use crate::domain::conflict::{Conflict, ConflictRef};
-use crate::domain::entry::{Entry, EntryDelete};
-use crate::encryption::{decrypt, encrypt, load_key};
+use crate::domain::conflict::{Conflict, HasId};
+use crate::domain::entry::Entry;
+use crate::domain::workspace::{Workspace, WorkspaceId};
+use crate::encryption::{decrypt, encrypt, load_key, EncryptedItem};
 use crate::settings::Settings;
 use crypto_secretbox::Key;
-use dirpin_common::api::AddEntryRequest;
-use eyre::Result;
+use dirpin_common::api::{AddEntryRequest, RefDelete, RefItem};
+use dirpin_common::domain::SyncVersion;
+use eyre::{bail, Result};
 use std::collections::HashMap;
+use std::hash::Hash;
+use std::str::FromStr;
 use time::OffsetDateTime;
 use uuid::Uuid;
+
+trait HasSyncProperties {
+    type Timestamp: PartialOrd + Clone;
+    type Version: PartialOrd;
+
+    fn updated_at(&self) -> &Self::Timestamp;
+    fn version(&self) -> &Self::Version;
+    fn deleted_at(&self) -> Option<&Self::Timestamp>;
+    fn set_deleted_at(&mut self, deleted_at: Self::Timestamp);
+}
+
+impl HasSyncProperties for Workspace {
+    type Timestamp = OffsetDateTime;
+    type Version = SyncVersion;
+
+    fn updated_at(&self) -> &Self::Timestamp {
+        &self.updated_at
+    }
+
+    fn version(&self) -> &Self::Version {
+        &self.version
+    }
+
+    fn deleted_at(&self) -> Option<&Self::Timestamp> {
+        self.deleted_at.as_ref()
+    }
+
+    fn set_deleted_at(&mut self, deleted_at: Self::Timestamp) {
+        self.deleted_at = Some(deleted_at);
+    }
+}
+
+impl HasSyncProperties for Entry {
+    type Timestamp = OffsetDateTime;
+    type Version = SyncVersion;
+
+    fn updated_at(&self) -> &Self::Timestamp {
+        &self.updated_at
+    }
+
+    fn version(&self) -> &Self::Version {
+        &self.version
+    }
+
+    fn deleted_at(&self) -> Option<&Self::Timestamp> {
+        self.deleted_at.as_ref()
+    }
+
+    fn set_deleted_at(&mut self, deleted_at: Self::Timestamp) {
+        self.deleted_at = Some(deleted_at);
+    }
+}
+
+impl HasSyncProperties for RefDelete {
+    type Timestamp = OffsetDateTime;
+    type Version = SyncVersion;
+
+    fn updated_at(&self) -> &Self::Timestamp {
+        &self.updated_at
+    }
+
+    fn version(&self) -> &Self::Version {
+        &self.version
+    }
+
+    fn deleted_at(&self) -> Option<&Self::Timestamp> {
+        Some(&self.deleted_at)
+    }
+
+    fn set_deleted_at(&mut self, _deleted_at: Self::Timestamp) {
+        unreachable!()
+    }
+}
+
+impl HasId for Entry {
+    fn id(&self) -> &Uuid {
+        &self.id
+    }
+}
+
+impl HasId for Workspace {
+    fn id(&self) -> &Uuid {
+        self.id.inner()
+    }
+}
+
+fn parse_remote_updates(
+    items: Vec<RefItem>,
+    key: &Key,
+) -> Result<(HashMap<WorkspaceId, Workspace>, HashMap<Uuid, Entry>)> {
+    let mut workspaces: HashMap<WorkspaceId, Workspace> = HashMap::new();
+    let mut entries: HashMap<Uuid, Entry> = HashMap::new();
+
+    let decrypted = items.iter().map(|x| {
+        let decoded = EncryptedItem::from_json_base64(&x.data).expect("failed deserialize");
+        (&x.kind, decoded)
+    });
+
+    for (kind, data) in decrypted {
+        match kind.as_str() {
+            "entry" => {
+                let entry: Entry = decrypt(data, key).expect("failed to decrypt entry. check key!");
+                entries.insert(entry.id, entry);
+            }
+            "workspace" => {
+                let workspace: Workspace =
+                    decrypt(data, key).expect("failed to decrypt worksapce. check key!");
+                workspaces.insert(workspace.id.clone(), workspace);
+            }
+            value => bail!("Failed to recoghnize {value} remote entry"),
+        }
+    }
+
+    Ok((workspaces, entries))
+}
+
+fn parse_remote_delets(
+    items: Vec<RefDelete>,
+) -> Result<(
+    HashMap<WorkspaceId, RefDelete>,
+    HashMap<Uuid, RefDelete>,
+    Vec<RefDelete>,
+)> {
+    let mut workspaces: HashMap<WorkspaceId, RefDelete> = HashMap::new();
+    let mut entries: HashMap<Uuid, RefDelete> = HashMap::new();
+    let mut unknown = Vec::new();
+
+    for item in items {
+        match item.kind.as_str() {
+            "workspace" => {
+                let id = WorkspaceId::from_str(&item.client_id)?;
+                workspaces.insert(id, item);
+            }
+            "entry" => {
+                let id = Uuid::parse_str(&item.client_id)?;
+                entries.insert(id, item);
+            }
+            _ => {
+                unknown.push(item);
+            }
+        }
+    }
+
+    Ok((workspaces, entries, unknown))
+}
+
+async fn get_local_updates(
+    db: &Database,
+    from: &OffsetDateTime,
+) -> Result<(HashMap<WorkspaceId, Workspace>, HashMap<Uuid, Entry>)> {
+    let workspaces: HashMap<WorkspaceId, Workspace> = db
+        .after_workspaces(*from)
+        .await?
+        .into_iter()
+        .map(|x| (x.id.clone(), x))
+        .collect();
+
+    let entries: HashMap<Uuid, Entry> = db
+        .after(*from)
+        .await?
+        .into_iter()
+        .map(|x| (x.id.clone(), x))
+        .collect();
+
+    Ok((workspaces, entries))
+}
+
+async fn get_local_delets(
+    db: &Database,
+    from: &OffsetDateTime,
+) -> Result<(HashMap<WorkspaceId, Workspace>, HashMap<Uuid, Entry>)> {
+    let workspaces: HashMap<WorkspaceId, Workspace> = db
+        .deleted_after_workspaces(*from)
+        .await?
+        .into_iter()
+        .map(|x| (x.id.clone(), x))
+        .collect();
+
+    let entries: HashMap<Uuid, Entry> = db
+        .deleted_after(*from)
+        .await?
+        .into_iter()
+        .map(|x| (x.id.clone(), x))
+        .collect();
+
+    Ok((workspaces, entries))
+}
+
+fn collect_diff_updates<H, T>(
+    remote: &HashMap<H, T>,
+    local: &HashMap<H, T>,
+    changes: &mut Vec<T>,
+    conflicts: &mut Vec<Conflict>,
+) -> Result<()>
+where
+    H: Hash + Eq,
+    T: HasSyncProperties + Clone + HasId + serde::Serialize,
+{
+    for (id, r) in remote {
+        if let Some(l) = local.get(&id) {
+            let r_time = r.updated_at();
+            let l_time = l.updated_at();
+            let r_version = r.version();
+            let l_version = l.version();
+
+            // If updated_at and version is higher, it's all good
+            if r_time > l_time && r_version > l_version {
+                changes.push(r.clone());
+            // if timed_at and version is equal, it's old and good,
+            } else if r_time == l_time && r_version == l_version {
+                continue;
+            // if locals are higher, local will update later
+            } else if r_time < l_time && r_version < l_version {
+                continue;
+            // otherwise we have a conflict;
+            } else {
+                let conflict = Conflict::from_serializable(r)?;
+                conflicts.push(conflict);
+            }
+        } else {
+            changes.push(r.clone());
+        }
+    }
+
+    Ok(())
+}
+
+fn collect_diff_delets<H, T>(
+    remote: &HashMap<H, RefDelete>,
+    local: &HashMap<H, T>,
+    changes: &mut Vec<RefDelete>,
+    conflicts: &mut Vec<Conflict>,
+) -> Result<()>
+where
+    H: Hash + Eq,
+    T: HasSyncProperties<Timestamp = OffsetDateTime, Version = SyncVersion>
+        + Clone
+        + HasId
+        + serde::Serialize,
+    RefDelete: HasSyncProperties,
+    OffsetDateTime: PartialOrd<<T as HasSyncProperties>::Timestamp>,
+{
+    for (id, r) in remote {
+        if let Some(l) = local.get(&id) {
+            // If either version or updated_at are higher locally, it means there is some conflict.
+            if r.updated_at() < l.updated_at() || r.version() < l.version() {
+                let mut item = l.clone();
+                item.set_deleted_at(r.deleted_at.clone());
+                let conflict = Conflict::from_serializable(&item)?;
+                conflicts.push(conflict);
+                continue;
+            }
+        }
+
+        changes.push(r.clone());
+    }
+
+    Ok(())
+}
+
+struct SyncStatus {
+    workspace_delets: usize,
+    workspace_updates: usize,
+    entry_delets: usize,
+    entry_updates: usize,
+}
 
 /// Get the list of the updates (full data)
 /// Get the list of the deletes (id, deleted_at)
@@ -21,95 +291,80 @@ async fn sync_download(
     session: &str,
     key: &Key,
     from: OffsetDateTime,
-) -> Result<(usize, usize)> {
+) -> Result<SyncStatus> {
     let res = AuthClient::new(&settings.server_address, session)?
         .sync(from)
         .await?;
 
-    let local: HashMap<Uuid, Entry> = db
-        .after(from)
-        .await?
-        .into_iter()
-        .map(|x| (x.id.clone(), x))
-        .collect();
-    let remote: HashMap<Uuid, Entry> = res
-        .updated
-        .iter()
-        .map(|x| serde_json::from_str(x).expect("failed deserialize"))
-        .map(|x| decrypt(x, key).expect("failed to decrypt entry. check key!"))
-        .map(|x: Entry| (x.id.clone(), x))
-        .collect();
+    let (remote_workspace_ups, remote_entry_ups) = parse_remote_updates(res.updated, key)?;
+    let (remote_workspace_dels, remote_entry_dels, unknown_dels) =
+        parse_remote_delets(res.deleted)?;
+    let (local_workspace_ups, local_entry_ups) = get_local_updates(db, &from).await?;
+    let (local_workspace_dels, local_entry_dels) = get_local_delets(db, &from).await?;
 
-    let mut update_buf: Vec<Entry> = vec![];
-    let mut conflict_buf: Vec<Conflict> = vec![];
-    let mut delete_buf: Vec<EntryDelete> = vec![];
-
-    // Collect new versions into update buffer or conflict buffer.
-    for (id, r) in remote {
-        if let Some(l) = local.get(&id) {
-            // If updated_at and version is higher, it's all good
-            if r.updated_at > l.updated_at && r.version > l.version {
-                update_buf.push(r);
-            // if updated_at and version is equal, it's old and good,
-            } else if r.updated_at == l.updated_at && r.version == l.version {
-                continue;
-            // if locals are higher, local will update later
-            } else if r.updated_at < l.updated_at && r.version < l.version {
-                continue;
-            // otherwise we have a conflict;
-            } else {
-                let conflict = Conflict::try_from(&r)?;
-                conflict_buf.push(conflict);
-            }
-        } else {
-            update_buf.push(r);
-        }
+    if !unknown_dels.is_empty() {
+        bail!(
+            "Found {} unknown deletion kinds in server resopnse",
+            unknown_dels.len()
+        );
     }
 
-    let update_count = update_buf.len();
-    let mut delete_count = 0;
+    let mut update_workspaces: Vec<Workspace> = vec![];
+    let mut update_entries: Vec<Entry> = vec![];
+    let mut delete_workspaces: Vec<RefDelete> = vec![];
+    let mut delete_entries: Vec<RefDelete> = vec![];
+    let mut conflicts: Vec<Conflict> = vec![];
 
-    let mut local: HashMap<Uuid, Entry> = db
-        .list_deleted()
-        .await?
-        .into_iter()
-        .map(|x| (x.id.clone(), x))
-        .collect();
-    let remote: HashMap<Uuid, EntryDelete> = res
-        .deleted
-        .into_iter()
-        .filter_map(|x| x.try_into().ok())
-        .map(|x: EntryDelete| (x.id.clone(), x))
-        .collect();
+    collect_diff_updates(
+        &remote_workspace_ups,
+        &local_workspace_ups,
+        &mut update_workspaces,
+        &mut conflicts,
+    )?;
+    collect_diff_updates(
+        &remote_entry_ups,
+        &local_entry_ups,
+        &mut update_entries,
+        &mut conflicts,
+    )?;
 
-    // Collect deleted entries into update buffer or conflict buffer.
-    for (id, r) in remote {
-        if let Some(l) = local.get_mut(&id) {
-            delete_count += 1;
-            // If either version or updated_at are higher locally, it means there is some conflict.
-            if r.updated_at < l.updated_at || r.version < l.version {
-                l.deleted_at = Some(r.deleted_at);
-                conflict_buf.push(Conflict::try_from(&(*l))?);
-                continue;
-            }
-        }
+    collect_diff_delets(
+        &remote_workspace_dels,
+        &local_workspace_dels,
+        &mut delete_workspaces,
+        &mut conflicts,
+    )?;
+    collect_diff_delets(
+        &remote_entry_dels,
+        &local_entry_dels,
+        &mut delete_entries,
+        &mut conflicts,
+    )?;
 
-        delete_buf.push(r);
-    }
+    // Update first. Workspaces must go first.
+    db.save_workspace_bulk(&update_workspaces).await?;
+    db.save_bulk(&update_entries).await?;
 
-    db.save_bulk(&update_buf).await?;
-    db.delete_bulk(&delete_buf).await?;
+    // Delete second
+    db.delete_workspace_ref_bulk(&delete_workspaces).await?;
+    db.delete_ref_bulk(&delete_entries).await?;
 
-    if !conflict_buf.is_empty() {
-        db.save_conflicts_bulk(&conflict_buf).await?;
+    // Check for conflicts
+    if !conflicts.is_empty() {
+        db.save_conflicts_bulk(&conflicts).await?;
         println!(
             "{} conflicts. Resolve in app before resyncing",
-            conflict_buf.len()
+            conflicts.len()
         );
         std::process::exit(0);
     }
 
-    Ok((update_count, delete_count))
+    Ok(SyncStatus {
+        workspace_updates: update_workspaces.len(),
+        workspace_delets: delete_workspaces.len(),
+        entry_updates: update_entries.len(),
+        entry_delets: delete_entries.len(),
+    })
 }
 
 /// The assumptoin for the logic of this function is that this function always runs after the
@@ -128,24 +383,42 @@ async fn sync_upload(
     force: bool,
 ) -> Result<usize> {
     // TODO: Split this into pages so that we don't have massive payload.
-    let mut items = db.after(from).await?;
-    let update_count = items.len();
+    let mut entries = db.after(from).await?;
+    let mut workspaces = db.after_workspaces(from).await?;
+    let update_count = entries.len();
     let mut buffer = vec![];
 
     if !force {
-        items.extend(db.deleted_after(from).await?);
+        entries.extend(db.deleted_after(from).await?);
+        workspaces.extend(db.deleted_after_workspaces(from).await?);
     }
 
-    for el in &items {
-        let data = encrypt(el, key)?;
-        let data = serde_json::to_string(&data)?;
+    for entry in &entries {
+        let data = encrypt(entry, key)?;
+        let data = data.to_json_base64()?;
 
         let p = AddEntryRequest {
-            id: el.id.to_string(),
+            id: entry.id.to_string(),
             data,
-            version: el.version.inner(),
-            updated_at: el.updated_at,
-            deleted_at: el.deleted_at,
+            kind: "entry".into(),
+            version: entry.version.inner(),
+            updated_at: entry.updated_at,
+            deleted_at: entry.deleted_at,
+        };
+        buffer.push(p);
+    }
+
+    for ws in &workspaces {
+        let data = encrypt(ws, key)?;
+        let data = data.to_json_base64()?;
+
+        let p = AddEntryRequest {
+            id: ws.id.to_string(),
+            data,
+            kind: "workspace".into(),
+            version: ws.version.inner(),
+            updated_at: ws.updated_at,
+            deleted_at: ws.deleted_at,
         };
         buffer.push(p);
     }
@@ -184,12 +457,16 @@ pub async fn sync(settings: &Settings, db: &Database, force: bool) -> Result<()>
         from
     };
 
-    let (download_count, delete_count) =
-        sync_download(settings, db, &session, &key, from.clone()).await?;
+    let status = sync_download(settings, db, &session, &key, from.clone()).await?;
     let upload_count = sync_upload(settings, db, &session, &key, from, force).await?;
 
     println!(
-        "Sync done. {upload_count} Uploaded / {delete_count} Deleted / {download_count} Downloaded"
+        "Workspaces: {} Uploaded / {} Deleted / {} Downloaded",
+        0, status.workspace_delets, status.workspace_updates
+    );
+    println!(
+        "Entries: {} Uploaded / {} Deleted / {} Downloaded",
+        0, status.entry_delets, status.entry_updates
     );
     Settings::save_last_sync()?;
     Ok(())

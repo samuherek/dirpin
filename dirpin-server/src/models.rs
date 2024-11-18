@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use time::OffsetDateTime;
 
 #[derive(Debug)]
@@ -7,8 +8,37 @@ pub struct NewEntry {
     pub user_id: i64,
     pub version: u32,
     pub data: String,
+    pub kind: String,
     pub updated_at: OffsetDateTime,
     pub deleted_at: Option<OffsetDateTime>,
+}
+
+#[derive(Debug)]
+pub enum RemoteKind {
+    Entry,
+    Workspace,
+}
+
+impl std::fmt::Display for RemoteKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let value = match self {
+            RemoteKind::Entry => "entry",
+            RemoteKind::Workspace => "workspace",
+        };
+        write!(f, "{}", value)
+    }
+}
+
+impl FromStr for RemoteKind {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "entry" => Ok(Self::Entry),
+            "workspace" => Ok(Self::Workspace),
+            _ => Err("Failed to parse RemoteKind".to_string()),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -24,6 +54,9 @@ pub struct Entry {
     pub version: u32,
     /// Host: The encrypted data of the entry
     pub data: String,
+    /// Host: unencrypted type of entry -> entry/workspace
+    /// TODO: Think wehether we need to actually encrypt this or it's ok.
+    pub kind: String,
     /// Remote: synced_at timestamp
     pub synced_at: OffsetDateTime,
     /// Host: updated_at of the entry to conflict detect uploads

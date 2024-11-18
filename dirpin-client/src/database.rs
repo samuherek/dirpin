@@ -1,8 +1,9 @@
 use crate::domain::conflict::Conflict;
 use crate::domain::context::Context;
-use crate::domain::entry::{Entry, EntryDelete, EntryKind};
+use crate::domain::entry::{Entry, EntryKind};
 use crate::domain::host::HostId;
 use crate::domain::workspace::{Workspace, WorkspaceId, WorkspacePath};
+use dirpin_common::api::RefDelete;
 use dirpin_common::domain::SyncVersion;
 use eyre::Result;
 use futures_util::TryStreamExt;
@@ -158,7 +159,7 @@ impl Database {
     }
 
     pub async fn save(&self, item: &Entry) -> Result<()> {
-        debug!("Saving pin to database");
+        debug!("Saving entry to database");
         let mut tx = self.pool.begin().await?;
         // TODO: if transaction fails, it does not throw error?
         Self::save_tx(&mut tx, item).await?;
@@ -217,7 +218,49 @@ impl Database {
         Ok(res)
     }
 
+    pub async fn after_workspaces(&self, updated_at: OffsetDateTime) -> Result<Vec<Workspace>> {
+        debug!("Query workspaces before from datbase");
+        let res = sqlx::query_as(
+            "select * from workspaces where updated_at >= ?1 and deleted_at is null",
+        )
+        .bind(updated_at.unix_timestamp_nanos() as i64)
+        .fetch(&self.pool)
+        .map_ok(|DbWorkspace(ws)| ws)
+        .try_collect()
+        .await?;
+
+        Ok(res)
+    }
+
+    pub async fn deleted_after_workspaces(
+        &self,
+        deleted_at: OffsetDateTime,
+    ) -> Result<Vec<Workspace>> {
+        debug!("Query deleted workspaces before from datbase");
+        let res = sqlx::query_as("select * from workspaces where deleted_at >= ?1")
+            .bind(deleted_at.unix_timestamp())
+            .fetch(&self.pool)
+            .map_ok(|DbWorkspace(ws)| ws)
+            .try_collect()
+            .await?;
+
+        Ok(res)
+    }
+
     pub async fn save_workspace(&self, v: &Workspace) -> Result<()> {
+        debug!("Saving workspace to database");
+        let mut tx = self.pool.begin().await?;
+        // TODO: if transaction fails, it does not throw error?
+        Self::save_workspace_tx(&mut tx, v).await?;
+        tx.commit().await?;
+
+        Ok(())
+    }
+
+    async fn save_workspace_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        v: &Workspace,
+    ) -> Result<()> {
         debug!("Saving workspace in database");
         sqlx::query(
             r#"
@@ -250,10 +293,77 @@ impl Database {
         .bind(v.updated_at.unix_timestamp_nanos() as i64)
         .bind(v.deleted_at.map(|x| x.unix_timestamp()))
         .bind(v.version.inner())
-        .execute(&self.pool)
+        .execute(&mut **tx)
         .await?;
 
         Ok(())
+    }
+
+    pub async fn save_workspace_bulk(&self, items: &[Workspace]) -> Result<()> {
+        debug!("Saving workspace in bulk to database");
+        let mut tx = self.pool.begin().await?;
+        for el in items {
+            Self::save_workspace_tx(&mut tx, &el).await?;
+        }
+        tx.commit().await?;
+
+        Ok(())
+    }
+
+    async fn delete_workspace_tx(
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        v: &RefDelete,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            insert into workspaces(
+                id, name, git, paths, updated_at, deleted_at, version
+            )
+            values(
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7
+            ) 
+            on conflict(id) do update set 
+                name = ?2,
+                git = ?3,
+                paths = ?4,
+                updated_at = ?5,
+                deleted_at = ?6,
+                version = ?7
+            "#,
+        )
+        .bind(v.client_id.as_str())
+        .bind("")
+        .bind(None::<String>)
+        .bind("")
+        .bind(v.updated_at.unix_timestamp_nanos() as i64)
+        .bind(v.deleted_at.unix_timestamp())
+        .bind(v.version.inner())
+        .execute(&mut **tx)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn delete_workspace_ref_bulk(&self, items: &[RefDelete]) -> Result<()> {
+        debug!("Deleting workspaces in bulk in database");
+        let mut tx = self.pool.begin().await?;
+        for el in items {
+            Self::delete_workspace_tx(&mut tx, &el).await?;
+        }
+        tx.commit().await?;
+
+        Ok(())
+    }
+
+    pub async fn list_workspace_deleted(&self) -> Result<Vec<Workspace>> {
+        debug!("Query workspaces deleted datbase");
+        let res = sqlx::query_as("select * from workspaces where deleted_at not null")
+            .fetch(&self.pool)
+            .map_ok(|DbWorkspace(ws)| ws)
+            .try_collect()
+            .await?;
+
+        Ok(res)
     }
 
     async fn save_conflict_tx(
@@ -295,7 +405,7 @@ impl Database {
 
     pub async fn delete_tx(
         tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
-        v: &EntryDelete,
+        v: &RefDelete,
     ) -> Result<()> {
         sqlx::query(
             r#"
@@ -317,7 +427,7 @@ impl Database {
                 host_id = ?11
             "#,
         )
-        .bind(v.id.to_string())
+        .bind(v.client_id.as_str())
         .bind("")
         .bind("")
         .bind("")
@@ -334,7 +444,18 @@ impl Database {
         Ok(())
     }
 
-    pub async fn delete_bulk(&self, items: &[EntryDelete]) -> Result<()> {
+    pub async fn delete_ref_bulk(&self, items: &[RefDelete]) -> Result<()> {
+        debug!("Deleting entries in bulk in database");
+        let mut tx = self.pool.begin().await?;
+        for el in items {
+            Self::delete_tx(&mut tx, &el).await?;
+        }
+        tx.commit().await?;
+
+        Ok(())
+    }
+
+    pub async fn delete_bulk(&self, items: &[RefDelete]) -> Result<()> {
         debug!("Deleting entries in bulk in database");
         let mut tx = self.pool.begin().await?;
         for el in items {

@@ -2,8 +2,9 @@ use crate::settings::Settings;
 use base64::prelude::{Engine, BASE64_STANDARD};
 use crypto_secretbox::aead::{AeadCore, AeadInPlace, Nonce, OsRng};
 use crypto_secretbox::{Key, KeyInit, XSalsa20Poly1305};
-use eyre::{bail, ensure, eyre, Context, Result};
+use eyre::{bail, ensure, eyre, Context, Report, Result};
 use fs_err as fs;
+use std::convert::TryInto;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
@@ -14,6 +15,68 @@ pub struct EncryptedItem {
     pub key: Vec<u8>,
     pub key_nonce: Nonce<XSalsa20Poly1305>,
     pub nonce: Nonce<XSalsa20Poly1305>,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct EncryptedItemEncoded {
+    pub ciphertext: String,
+    pub key: String,
+    pub key_nonce: String,
+    pub nonce: String,
+}
+
+impl From<EncryptedItem> for EncryptedItemEncoded {
+    fn from(item: EncryptedItem) -> Self {
+        Self {
+            ciphertext: BASE64_STANDARD.encode(item.ciphertext),
+            key: BASE64_STANDARD.encode(item.key),
+            key_nonce: BASE64_STANDARD.encode(item.key_nonce),
+            nonce: BASE64_STANDARD.encode(item.nonce),
+        }
+    }
+}
+
+impl TryFrom<EncryptedItemEncoded> for EncryptedItem {
+    type Error = Report;
+
+    fn try_from(item: EncryptedItemEncoded) -> Result<Self> {
+        let key_nonce = BASE64_STANDARD
+            .decode(item.key_nonce)
+            .wrap_err("Invalid size for key nonce")?;
+        let key_nonce = Nonce::<XSalsa20Poly1305>::clone_from_slice(&key_nonce);
+
+        let nonce: [u8; 24] = BASE64_STANDARD
+            .decode(item.nonce)?
+            .try_into()
+            .map_err(|_| eyre!("Invalid size for nonce"))?;
+        let nonce = Nonce::<XSalsa20Poly1305>::clone_from_slice(&nonce);
+
+        let value = Self {
+            ciphertext: BASE64_STANDARD.decode(item.ciphertext)?,
+            key: BASE64_STANDARD.decode(item.key)?,
+            key_nonce,
+            nonce,
+        };
+
+        Ok(value)
+    }
+}
+
+impl EncryptedItem {
+    pub fn to_json_base64(self) -> Result<String> {
+        let value = serde_json::to_string(&EncryptedItemEncoded::from(self))
+            .wrap_err("failed to serialize")?;
+
+        Ok(value)
+    }
+
+    pub fn from_json_base64(value: &str) -> Result<Self> {
+        let value: EncryptedItemEncoded =
+            serde_json::from_str(value).wrap_err("failed to deserialize")?;
+        let value = EncryptedItem::try_from(value).wrap_err("failed to decript base64")?;
+
+        Ok(value)
+    }
 }
 
 pub fn generate_encoded_key() -> Result<(Key, String)> {

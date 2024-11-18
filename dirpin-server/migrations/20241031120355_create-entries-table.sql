@@ -5,6 +5,7 @@ create table if not exists entries(
     user_id integer not null,       -- id of the registered user
     version integer not null,       -- nonencryped metadata to know the latest update
     data text not null,             -- encrypted data for the pin
+    kind text not null,             -- setting the kind of the entry
     updated_at integer not null,    -- nonencryped metadata to konw the last update
     synced_at integer not null,     -- Tag when this was last synced at
     deleted_at                      -- Soft delete

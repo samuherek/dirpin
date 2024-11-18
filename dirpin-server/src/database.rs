@@ -26,6 +26,7 @@ impl<'r> FromRow<'r, SqliteRow> for DbEntry {
             user_id: row.try_get("user_id")?,
             version: row.try_get("version")?,
             data: row.try_get("data")?,
+            kind: row.try_get("kind").map(|x: &str| x.parse().unwrap())?,
             synced_at: row
                 .try_get("synced_at")
                 .map(|x: i64| OffsetDateTime::from_unix_timestamp(x).unwrap())?,
@@ -162,10 +163,10 @@ impl Database {
             sqlx::query(
                 r#"
                 insert into entries(
-                    client_id, user_id, updated_at, version, data, deleted_at, synced_at
+                    client_id, user_id, updated_at, version, data, kind, deleted_at, synced_at
                 ) 
                 values(
-                    ?1, ?2, ?3, ?4, ?5, ?6, ?7
+                    ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8
                 )
                 on conflict(client_id) do update set
                     client_id = ?1,
@@ -173,8 +174,9 @@ impl Database {
                     updated_at = ?3, 
                     version = ?4, 
                     data = ?5,
-                    deleted_at = ?6,
-                    synced_at = ?7
+                    kind = ?6,
+                    deleted_at = ?7,
+                    synced_at = ?8
             "#,
             )
             .bind(el.client_id.as_str())
@@ -182,6 +184,7 @@ impl Database {
             .bind(el.updated_at.unix_timestamp_nanos() as i64)
             .bind(el.version)
             .bind(el.data.as_str())
+            .bind(el.kind.to_string())
             .bind(el.deleted_at.map(|x| x.unix_timestamp()))
             .bind(OffsetDateTime::now_utc().unix_timestamp())
             .execute(&mut *tx)

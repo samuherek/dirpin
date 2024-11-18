@@ -5,7 +5,7 @@ use crate::router::AppState;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json};
-use dirpin_common::api::{AddEntryRequest, Deleted, SyncRequest, SyncResponse};
+use dirpin_common::api::{AddEntryRequest, RefDelete, RefItem, SyncRequest, SyncResponse};
 use tracing::error;
 
 // TODO: make a propert error response types
@@ -35,7 +35,13 @@ pub async fn sync(
             ServerError::DatabaseError("list entries")
         })?;
 
-    let updated = res.into_iter().map(|x| x.data).collect::<Vec<_>>();
+    let updated = res
+        .into_iter()
+        .map(|x| RefItem {
+            data: x.data,
+            kind: x.kind,
+        })
+        .collect::<Vec<_>>();
 
     let res = state
         .database
@@ -48,11 +54,12 @@ pub async fn sync(
 
     let deleted = res
         .into_iter()
-        .map(|x| Deleted {
+        .map(|x| RefDelete {
             client_id: x.client_id,
-            version: x.version,
+            version: x.version.into(),
             updated_at: x.updated_at,
             deleted_at: x.deleted_at.expect("failed to get deleted_at field"),
+            kind: x.kind,
         })
         .collect::<Vec<_>>();
 
@@ -71,6 +78,7 @@ pub async fn add(
             user_id: 1,
             version: x.version,
             data: x.data,
+            kind: x.kind,
             updated_at: x.updated_at,
             deleted_at: x.deleted_at,
         })

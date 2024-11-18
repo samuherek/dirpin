@@ -2,7 +2,7 @@ use crate::domain::context::Context;
 use crate::domain::host::HostId;
 use crate::domain::workspace::WorkspaceId;
 use crate::encryption::{rmp_error_report, MsgPackSerializable};
-use dirpin_common::api::Deleted;
+use dirpin_common::api::RefDelete;
 use dirpin_common::domain::SyncVersion;
 use eyre::{bail, Result};
 use rmp::decode::{self, Bytes, DecodeStringError};
@@ -69,11 +69,11 @@ impl Entry {
     const FIELD_LEN: u32 = 11;
 
     pub fn new(
-        value: String, 
+        value: String,
         path: String,
         workspace_id: Option<WorkspaceId>,
-        host_id: HostId
-        ) -> Self {
+        host_id: HostId,
+    ) -> Self {
         let id = Uuid::now_v7();
         let updated_at = OffsetDateTime::now_utc();
         Self {
@@ -239,23 +239,3 @@ impl MsgPackSerializable for Entry {
     }
 }
 
-#[derive(Debug, Clone)]
-/// Used as a version
-pub struct EntryDelete {
-    pub id: Uuid,
-    pub updated_at: OffsetDateTime,
-    pub deleted_at: OffsetDateTime,
-    pub version: SyncVersion,
-}
-impl TryFrom<Deleted> for EntryDelete {
-    type Error = uuid::Error;
-
-    fn try_from(value: Deleted) -> Result<Self, Self::Error> {
-        Ok(Self {
-            id: Uuid::parse_str(&value.client_id)?,
-            updated_at: value.updated_at,
-            deleted_at: value.deleted_at,
-            version: SyncVersion::new(),
-        })
-    }
-}
