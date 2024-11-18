@@ -1,6 +1,6 @@
 use dirpin_common::api::{
-    AddEntryRequest, HealthCheckResponse, LoginRequest, LoginResponse, LogoutResponse,
-    RegisterRequest, RegisterResponse, SyncResponse,
+    AddEntryRequest, AddSyncRequest, ErrorMessage, HealthCheckResponse, LoginRequest,
+    LoginResponse, LogoutResponse, RegisterRequest, RegisterResponse, SyncResponse,
 };
 use eyre::{bail, Result};
 use reqwest::header::{HeaderMap, AUTHORIZATION};
@@ -53,7 +53,7 @@ impl<'a> AuthClient<'a> {
         Ok(res)
     }
 
-    pub async fn post_entries(&self, data: &[AddEntryRequest]) -> Result<()> {
+    pub async fn post_entries(&self, data: &AddSyncRequest) -> Result<()> {
         let url = format!("{}/entries", self.address);
         let res = self.client.post(url).json(data).send().await?;
         handle_response_error(res).await?;
@@ -70,6 +70,8 @@ async fn handle_response_error(res: Response) -> Result<Response> {
 
     if !status.is_success() {
         println!("{res:?}");
+        let data = res.json::<ErrorMessage>().await?;
+        println!("{data:?}");
         // TODO: account for all the cases
         bail!("There was an error with the service: Status {status:?}.");
     }

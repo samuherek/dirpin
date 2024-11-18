@@ -11,6 +11,7 @@ mod router;
 mod models;
 mod authentication;
 pub mod settings;
+mod error;
 
 use database::Database;
 

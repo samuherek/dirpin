@@ -1,5 +1,5 @@
 use crate::database::{Database, DbError};
-use crate::handlers::ServerError;
+use crate::error::ServerError;
 use crate::models::User;
 use crate::router::AppState;
 use argon2::password_hash::{rand_core::OsRng, PasswordHasher, SaltString};

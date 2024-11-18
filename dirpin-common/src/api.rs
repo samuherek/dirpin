@@ -13,6 +13,13 @@ pub struct SyncRequest {
     pub last_sync_ts: OffsetDateTime,
 }
 
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct AddSyncRequest {
+    pub items: Vec<AddEntryRequest>,
+    #[serde(with = "time::serde::rfc3339")]
+    pub last_sync_ts: OffsetDateTime,
+}
+
 #[derive(Debug, serde::Serialize, serde::Deserialize, Clone)]
 /// The entry reference coming from the remote
 pub struct RefDelete {
@@ -83,4 +90,9 @@ pub struct LoginRequest {
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct LoginResponse {
     pub session: String,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct ErrorMessage {
+    pub value: String,
 }

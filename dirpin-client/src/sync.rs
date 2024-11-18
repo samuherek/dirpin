@@ -6,7 +6,7 @@ use crate::domain::workspace::{Workspace, WorkspaceId};
 use crate::encryption::{decrypt, encrypt, load_key, EncryptedItem};
 use crate::settings::Settings;
 use crypto_secretbox::Key;
-use dirpin_common::api::{AddEntryRequest, RefDelete, RefItem};
+use dirpin_common::api::{AddEntryRequest, AddSyncRequest, RefDelete, RefItem};
 use dirpin_common::domain::SyncVersion;
 use eyre::{bail, Result};
 use std::collections::HashMap;
@@ -419,7 +419,10 @@ async fn sync_upload(
     }
 
     AuthClient::new(&settings.server_address, session)?
-        .post_entries(&buffer)
+        .post_entries(&AddSyncRequest {
+            items: buffer,
+            last_sync_ts: from,
+        })
         .await?;
 
     Ok(UploadStatus {

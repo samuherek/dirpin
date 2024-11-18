@@ -33,9 +33,10 @@ impl<'r> FromRow<'r, SqliteRow> for DbEntry {
             updated_at: row
                 .try_get("updated_at")
                 .map(|x: i64| OffsetDateTime::from_unix_timestamp_nanos(x as i128).unwrap())?,
-            deleted_at: row
-                .try_get("deleted_at")
-                .map(|x: i64| OffsetDateTime::from_unix_timestamp(x).ok())?,
+            deleted_at: row.try_get("deleted_at").map(|x: Option<i64>| match x {
+                Some(x) => OffsetDateTime::from_unix_timestamp(x).ok(),
+                None => None,
+            })?,
         }))
     }
 }
@@ -156,7 +157,25 @@ impl Database {
             .map_err(db_error)
     }
 
-    pub async fn add_entries(&self, entries: &[NewEntry]) -> Result<(), DbError> {
+    pub async fn list_changed_from(
+        &self,
+        user_id: u32,
+        from: OffsetDateTime,
+    ) -> Result<Vec<Entry>, DbError> {
+        sqlx::query_as(
+            "select * from entries where user_id = ?1 and (updated_at >= ?2 or deleted_at >= ?3)",
+        )
+        .bind(user_id)
+        .bind(from.unix_timestamp_nanos() as i64)
+        .bind(from.unix_timestamp())
+        .fetch(&self.pool)
+        .map_ok(|DbEntry(entry)| entry)
+        .try_collect()
+        .await
+        .map_err(db_error)
+    }
+
+    pub async fn save_entries(&self, entries: &[NewEntry]) -> Result<(), DbError> {
         let mut tx = self.pool.begin().await.map_err(db_error)?;
 
         for el in entries {

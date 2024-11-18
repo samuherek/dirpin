@@ -1,6 +1,6 @@
 use crate::authentication::{hash_password, session_expires_at, validate_credentials, UserSession};
 use crate::database::DbError;
-use crate::handlers::ServerError;
+use crate::error::ServerError;
 use crate::models::{HostSession, NewSession, NewUser, RenewSession};
 use crate::router::AppState;
 use axum::extract::State;
@@ -123,9 +123,9 @@ pub async fn login(
     }))
 }
 
-// TODO:: we don't actually use this in the dirpin client. 
+// TODO:: we don't actually use this in the dirpin client.
 // But we might want to use it at some point. In the client
-// we just remove the session from the host. 
+// we just remove the session from the host.
 pub async fn logout(
     session: UserSession,
     state: State<AppState>,
