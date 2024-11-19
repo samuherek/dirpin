@@ -1,0 +1,21 @@
+[package]
+name = "int-tests"
+edition = "2021"
+
+[dependencies]
+dirpin-client = { path = "../dirpin-client" }
+dirpin-server = { path = "../dirpin-server" }
+dirpin-common = { path = "../dirpin-common" }
+
+tokio = { workspace = true }
+config = { workspace = true }
+eyre = { workspace = true }
+serde = { workspace = true }
+time = { workspace = true }
+futures-util = { workspace = true }
+sqlx = { version = "0.8.2", features = ["sqlite", "time", "uuid", "runtime-tokio-rustls", "migrate", "macros"] }
+fake = "~2.3"
+quickcheck = "0.9.2"
+quickcheck_macros = "0.9.1"
+wiremock = "0.5"
+
