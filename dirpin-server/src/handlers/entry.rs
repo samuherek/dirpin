@@ -2,10 +2,13 @@ use crate::authentication::UserSession;
 use crate::error::ServerError;
 use crate::models::{Entry, NewEntry};
 use crate::router::AppState;
+use crate::VERSION;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json};
-use dirpin_common::api::{AddSyncRequest, RefDelete, RefItem, SyncRequest, SyncResponse};
+use dirpin_common::api::{
+    AddSyncRequest, RefDelete, RefItem, StatusResponse, SyncRequest, SyncResponse,
+};
 use std::collections::HashMap;
 use tracing::error;
 
@@ -151,4 +154,13 @@ pub async fn add(
         })?;
 
     Ok(StatusCode::OK)
+}
+
+pub async fn status(session: UserSession) -> Result<Json<StatusResponse>, ServerError> {
+    let user = session.user();
+
+    Ok(Json(StatusResponse {
+        username: user.username.clone(),
+        version: VERSION.into(),
+    }))
 }

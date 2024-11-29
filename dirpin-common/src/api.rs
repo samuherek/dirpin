@@ -1,7 +1,7 @@
 use crate::domain::SyncVersion;
 use time::OffsetDateTime;
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub struct HealthCheckResponse {
     pub status: String,
     pub version: String,
@@ -47,6 +47,14 @@ pub struct SyncResponse {
     pub updated: Vec<RefItem>,
     /// These are all with delted_at field Some(_)
     pub deleted: Vec<RefDelete>,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct StatusResponse {
+    /// The username of the currently signed in user
+    pub username: String,
+    /// The server version of the library
+    pub version: String,
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]

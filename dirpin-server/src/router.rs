@@ -19,6 +19,7 @@ pub fn router(database: Database) -> Router {
     let routes = Router::new()
         .route("/", get(handlers::index))
         .route("/sync", get(handlers::entry::sync))
+        .route("/sync/status", get(handlers::entry::status))
         .route("/entries", post(handlers::entry::add))
         .route("/register", post(handlers::user::register))
         .route("/login", post(handlers::user::login))

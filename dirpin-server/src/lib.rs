@@ -5,6 +5,8 @@ use std::net::SocketAddr;
 use tokio::net::TcpListener;
 use tokio::signal;
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 mod authentication;
 pub mod database;
 mod error;

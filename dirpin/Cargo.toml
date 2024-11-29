@@ -4,6 +4,13 @@ authros.workspace = true
 version.workspace = true
 edition.workspace = true
 
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+path = "src/main.rs"
+name = "dirpin"
+
 [dependencies]
 dirpin-common = { path = "../dirpin-common" }
 dirpin-client = { path = "../dirpin-client" }
@@ -31,3 +38,5 @@ quickcheck_macros = "0.9.1"
 wiremock = "0.5"
 tempfile = "3.14.0"
 axum = { workspace = true }
+reqwest = { workspace = true }
+serde_json = { workspace = true }

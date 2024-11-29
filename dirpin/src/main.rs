@@ -1,10 +1,7 @@
 use clap::Parser;
+use dirpin::command::DirpinCmd;
+use dirpin::VERSION;
 use eyre::Result;
-use command::DirpinCmd;
-mod command;
-mod tui;
-
-const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Parser)]
 #[command(

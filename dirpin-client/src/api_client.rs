@@ -1,6 +1,7 @@
 use dirpin_common::api::{
     AddEntryRequest, AddSyncRequest, ErrorMessage, HealthCheckResponse, LoginRequest,
     LoginResponse, LogoutResponse, RegisterRequest, RegisterResponse, SyncResponse,
+    StatusResponse
 };
 use eyre::{bail, Result};
 use reqwest::header::{HeaderMap, AUTHORIZATION};
@@ -59,6 +60,16 @@ impl<'a> AuthClient<'a> {
         handle_response_error(res).await?;
 
         Ok(())
+    }
+
+    pub async fn status(&self) -> Result<StatusResponse> {
+        let url = format!("{}/sync/status", self.address);
+        let res = self.client.get(url).send().await?;
+        let res = handle_response_error(res).await?;
+        let res = res.json::<StatusResponse>().await?;
+
+        Ok(res)
+
     }
 }
 
