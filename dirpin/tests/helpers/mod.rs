@@ -1,10 +1,14 @@
 use axum::serve;
 use dirpin_client::database::Database as ClientDatabase;
+use dirpin_client::domain::host::HostId;
 use dirpin_client::settings::Settings as ClientSettings;
 use dirpin_server::database::Database as ServerDatabase;
 use dirpin_server::make_router;
 use dirpin_server::settings::Settings as ServerSettings;
 use eyre::{eyre, Result};
+use fake::faker::internet::en::Username;
+use fake::faker::lorem::en::Word;
+use fake::{Fake};
 use tokio::net::TcpListener;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -88,4 +92,8 @@ pub async fn spawn_sync_app() -> Result<TestServer> {
     let r = make_router(&server.settings, server.database.clone()).await;
     let _ = tokio::spawn(async move { serve(listener, r.into_make_service()).await.unwrap() });
     Ok(server)
+}
+
+pub fn build_host_id() -> HostId {
+    HostId::custom(Username().fake::<String>(), Word().fake::<String>())
 }

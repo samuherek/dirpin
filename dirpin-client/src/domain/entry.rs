@@ -2,6 +2,7 @@ use crate::domain::context::Context;
 use crate::domain::host::HostId;
 use crate::domain::workspace::WorkspaceId;
 use crate::encryption::{rmp_error_report, MsgPackSerializable};
+use dirpin_common::api::AddEntryRequest;
 use dirpin_common::api::RefDelete;
 use dirpin_common::domain::SyncVersion;
 use eyre::{bail, Result};
@@ -238,4 +239,3 @@ impl MsgPackSerializable for Entry {
         })
     }
 }
-

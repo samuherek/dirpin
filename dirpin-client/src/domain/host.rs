@@ -16,10 +16,13 @@ use std::str::FromStr;
 pub struct HostId(String);
 
 impl HostId {
+    pub fn custom(username: String, host: String) -> Self {
+        Self(format_host_user(username, host))
+    }
+
     /// Format "{username}@{hostname}"
     pub fn get_host_id() -> Self {
-        let id = get_host_user();
-        Self(id)
+        Self(format_host_user(get_username(), get_hostname()))
     }
 }
 
@@ -65,6 +68,6 @@ fn get_username() -> String {
 }
 
 /// Format "{username}@{hostname}"
-fn get_host_user() -> String {
-    format!("{}@{}", get_username(), get_hostname())
+fn format_host_user(user: String, host: String) -> String {
+    format!("{}@{}", user, host)
 }
