@@ -39,7 +39,7 @@ impl Cmd {
         };
 
         let (context, workspace) = if self.global {
-            let context = Context::global(settings);
+            let context = Context::global();
             let global_name = Some("global".into());
             let workspace = match db.workspace(None, global_name, &context).await? {
                 Some(ws) => ws,
@@ -51,7 +51,7 @@ impl Cmd {
             };
             (context, Some(workspace))
         } else {
-            let context = Context::cwd(settings);
+            let context = Context::cwd();
             let mut workspace = db.workspace(None, None, &context).await?;
             if context.git.is_some() && workspace.is_none() {
                 let ws = Workspace::new(context.workspace_name(), &context);

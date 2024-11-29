@@ -10,9 +10,6 @@ use time::OffsetDateTime;
 
 #[tokio::test]
 async fn sync() {
-    // spanw server
-    // Send data up
-    // Receive the same data that was send up
     let server = spawn_sync_app().await.unwrap();
     let server_address = server.address();
 
@@ -81,7 +78,7 @@ async fn sync() {
         .updated
         .iter()
         .find(|x| &x.data == &data2)
-        .and_then(|x| Some(x.data.clone()   ));
+        .and_then(|x| Some(x.data.clone()));
 
     assert_eq!(Some(data1), res1);
     assert_eq!(Some(data2), res2);

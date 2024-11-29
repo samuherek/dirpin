@@ -825,6 +825,7 @@ dependencies = [
  "crypto_secretbox",
  "dirpin-common",
  "eyre",
+ "fake",
  "fs-err",
  "futures-util",
  "generic-array",
@@ -844,6 +845,7 @@ dependencies = [
  "urlencoding",
  "uuid",
  "whoami",
+ "wiremock",
 ]
 
 [[package]]

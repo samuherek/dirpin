@@ -274,6 +274,7 @@ where
     Ok(())
 }
 
+#[derive(Debug)]
 struct DownloadStatus {
     workspace_delets: usize,
     workspace_updates: usize,
@@ -286,15 +287,13 @@ struct DownloadStatus {
 /// Compare new updates with local db and buffer updates and conflicts
 /// Compare new delets with local db and buffer updates and conflicts
 async fn sync_download(
-    settings: &Settings,
+    server_address: &str,
     db: &Database,
     session: &str,
     key: &Key,
     from: OffsetDateTime,
 ) -> Result<DownloadStatus> {
-    let res = AuthClient::new(&settings.server_address, session)?
-        .sync(from)
-        .await?;
+    let res = AuthClient::new(server_address, session)?.sync(from).await?;
 
     let (remote_workspace_ups, remote_entry_ups) = parse_remote_updates(res.updated, key)?;
     let (remote_workspace_dels, remote_entry_dels, unknown_dels) =
@@ -367,6 +366,7 @@ async fn sync_download(
     })
 }
 
+#[derive(Debug)]
 struct UploadStatus {
     entries: usize,
     workspaces: usize,
@@ -381,7 +381,7 @@ struct UploadStatus {
 /// This is not buletproof, as there is a time in-between that can create new values from a
 /// different host. However, we'll use a periodic doctor to spot this.
 async fn sync_upload(
-    settings: &Settings,
+    server_address: &str,
     db: &Database,
     session: &str,
     key: &Key,
@@ -418,7 +418,7 @@ async fn sync_upload(
         });
     }
 
-    AuthClient::new(&settings.server_address, session)?
+    AuthClient::new(server_address, session)?
         .post_entries(&AddSyncRequest {
             items: buffer,
             last_sync_ts: from,
@@ -451,6 +451,7 @@ pub async fn sync(settings: &Settings, db: &Database, force: bool) -> Result<()>
     let from = Settings::last_sync()?;
     let key = load_key(settings)?;
     let session = session.unwrap();
+    let server_address = &settings.server_address;
 
     let from = if force {
         OffsetDateTime::UNIX_EPOCH
@@ -458,8 +459,8 @@ pub async fn sync(settings: &Settings, db: &Database, force: bool) -> Result<()>
         from
     };
 
-    let down_status = sync_download(settings, db, &session, &key, from.clone()).await?;
-    let up_status = sync_upload(settings, db, &session, &key, from).await?;
+    let down_status = sync_download(server_address, db, &session, &key, from.clone()).await?;
+    let up_status = sync_upload(server_address, db, &session, &key, from).await?;
 
     println!(
         "Workspaces: {} Uploaded / {} Deleted / {} Downloaded",
@@ -472,4 +473,216 @@ pub async fn sync(settings: &Settings, db: &Database, force: bool) -> Result<()>
     Settings::save_last_sync()?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::database::Database;
+    use crate::domain::entry::Entry;
+    use crate::domain::host::HostId;
+    use crate::encryption;
+    use crypto_secretbox::Key;
+    use fake::faker::lorem::en::Word;
+    use fake::Fake;
+    use time::OffsetDateTime;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn setup_key() -> eyre::Result<Key> {
+        let (key, _) = encryption::generate_encoded_key()?;
+
+        Ok(key)
+    }
+
+    async fn setup_db() -> eyre::Result<Database> {
+        let database = Database::new("sqlite::memory:").await?;
+        sqlx::migrate!("./migrations").run(&database.pool).await?;
+
+        Ok(database)
+    }
+
+    async fn setup_upload_test() -> eyre::Result<(String, String, Database, Key)> {
+        let key = setup_key()?;
+        let database = setup_db().await?;
+        let mock_server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/entries"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("done"))
+            .mount(&mock_server)
+            .await;
+
+        let _ = tokio::time::sleep(tokio::time::Duration::from_millis(200));
+
+        Ok((mock_server.uri(), "session".into(), database, key))
+    }
+
+    #[tokio::test]
+    async fn sync_upload_empty_data() {
+        let (address, session, database, key) = setup_upload_test().await.unwrap();
+
+        let res = super::sync_upload(
+            &address,
+            &database,
+            &session,
+            &key,
+            OffsetDateTime::UNIX_EPOCH,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(res.entries, 0);
+        assert_eq!(res.workspaces, 0);
+    }
+
+    #[tokio::test]
+    async fn sync_upload_with_entry() {
+        let (address, session, database, key) = setup_upload_test().await.unwrap();
+        let host_id = HostId::custom(Word().fake(), Word().fake());
+
+        let entry = Entry::new(Word().fake(), "/".into(), None, host_id);
+        database.save(&entry).await.unwrap();
+
+        let res = super::sync_upload(
+            &address,
+            &database,
+            &session,
+            &key,
+            OffsetDateTime::UNIX_EPOCH,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(res.entries, 1);
+        assert_eq!(res.workspaces, 0);
+    }
+
+    #[tokio::test]
+    async fn sync_upload_with_entries_and_workspace() {
+        use crate::domain::context::Context;
+        use crate::domain::workspace::Workspace;
+
+        let (address, session, database, key) = setup_upload_test().await.unwrap();
+        let host_id = HostId::custom(Word().fake(), Word().fake());
+
+        let workspace = Workspace::new("global".into(), &Context::global());
+        database.save_workspace(&workspace).await.unwrap();
+
+        let entries = vec![
+            Entry::new(
+                Word().fake(),
+                "/".into(),
+                Some(workspace.id.clone()),
+                host_id.clone(),
+            ),
+            Entry::new(
+                Word().fake(),
+                "/".into(),
+                Some(workspace.id.clone()),
+                host_id.clone(),
+            ),
+        ];
+        database.save_bulk(&entries).await.unwrap();
+
+        let res = super::sync_upload(
+            &address,
+            &database,
+            &session,
+            &key,
+            OffsetDateTime::UNIX_EPOCH,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(res.entries, 2);
+        assert_eq!(res.workspaces, 1);
+    }
+
+    #[tokio::test]
+    async fn sync_download() {
+        use crate::domain::context::Context;
+        use crate::domain::workspace::Workspace;
+
+        let key = setup_key().unwrap();
+        let database = setup_db().await.unwrap();
+
+        let host_id = HostId::custom(Word().fake(), Word().fake());
+        let workspace = Workspace::new("global".into(), &Context::global());
+        use crate::encryption::encrypt;
+        use dirpin_common::api::RefItem;
+
+        let updated = vec![
+            RefItem {
+                data: encrypt(&workspace, &key).unwrap().to_json_base64().unwrap(),
+                kind: "workspace".into(),
+            },
+            RefItem {
+                data: encrypt(
+                    &Entry::new(
+                        Word().fake(),
+                        "/".into(),
+                        Some(workspace.id.clone()),
+                        host_id.clone(),
+                    ),
+                    &key,
+                )
+                .unwrap()
+                .to_json_base64()
+                .unwrap(),
+                kind: "entry".into(),
+            },
+            RefItem {
+                data: encrypt(
+                    &Entry::new(
+                        Word().fake(),
+                        "/".into(),
+                        Some(workspace.id.clone()),
+                        host_id.clone(),
+                    ),
+                    &key,
+                )
+                .unwrap()
+                .to_json_base64()
+                .unwrap(),
+                kind: "entry".into(),
+            },
+        ];
+
+        let mock_server = MockServer::start().await;
+        // pub struct SyncResponse {
+        //     /// These are all with deleted_at field None
+        //     pub updated: Vec<RefItem>,
+        //     /// These are all with delted_at field Some(_)
+        //     pub deleted: Vec<RefDelete>,
+        Mock::given(method("GET"))
+            .and(path("/sync"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "updated": updated,
+                "deleted": []
+            })))
+            .mount(&mock_server)
+            .await;
+        let address = mock_server.uri();
+        let session = "session".to_string();
+
+        // buffer.push(AddEntryRequest {
+        //     id: workspace.id.to_string(),
+        //     data: encrypt(ws, key)?.to_json_base64()?,
+        //     kind: "workspace".into(),
+        //     version: workspace.version.inner(),
+        //     updated_at: workspace.updated_at,
+        //     deleted_at: workspace.deleted_at,
+        // });
+
+        let res = super::sync_download(
+            &address,
+            &database,
+            &session,
+            &key,
+            OffsetDateTime::UNIX_EPOCH,
+        )
+        .await
+        .unwrap();
+
+        println!("res: {res:?}");
+    }
 }

@@ -16,7 +16,7 @@ pub struct Context {
 impl Context {
     const GLOGAL_PATH: &'static str = "/";
 
-    pub fn cwd(_settings: &Settings) -> Self {
+    pub fn cwd() -> Self {
         let path = get_current_dir();
         let host_id = Settings::host_id();
         let git_path = get_git_parent_dir(&path);
@@ -30,7 +30,7 @@ impl Context {
         }
     }
 
-    pub fn global(_settings: &Settings) -> Self {
+    pub fn global() -> Self {
         let host_id = Settings::host_id();
 
         Self {
