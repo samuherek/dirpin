@@ -1,6 +1,7 @@
 use crate::domain::host::HostId;
 use config::builder::DefaultState;
 use config::{Config, ConfigBuilder, Environment, File as ConfigFile, FileFormat};
+use dirpin_common::utils::{config_dir, data_dir, home_dir};
 use eyre::{eyre, Context, Result};
 use std::fs::{create_dir_all, File};
 use std::io::Write;
@@ -88,8 +89,8 @@ impl Settings {
         value.ok()
     }
 
-    pub fn builder() -> Result<ConfigBuilder<DefaultState>> {
-        let data_dir = data_dir();
+    pub fn build_default() -> Result<ConfigBuilder<DefaultState>> {
+        let data_dir = std::env::var("DIRPIN_DATA_DIR").map_or(data_dir(), PathBuf::from);
         let db_path = data_dir.join("entries.db");
         let key_path = data_dir.join("key");
         // TODO: make the sessions path and the host_id path consistent. They are kind of private
@@ -111,6 +112,8 @@ impl Settings {
     }
 
     pub fn new() -> Result<Self> {
+        let mut config_builder = Self::build_default()?;
+
         let config_dir = config_dir();
         let data_dir = data_dir();
 
@@ -128,7 +131,6 @@ impl Settings {
 
         config_file.push("config.toml");
 
-        let mut config_builder = Self::builder()?;
         config_builder = if config_file.exists() {
             config_builder.add_source(ConfigFile::new(
                 config_file.to_str().unwrap(),
@@ -170,32 +172,4 @@ pub fn root_dir() -> PathBuf {
     // But then the logic is different. As we assume there is only one global
     // directory at this point. If anyone cares about this, we'll handle it then.
     PathBuf::from("C:\\")
-}
-
-// TODO: this is duplicate code from the server settings. Possibly merge it inot a dirpin_common or
-// find a better way to use it with easier overwrite in the settings.
-#[cfg(not(target_os = "windows"))]
-pub fn home_dir() -> PathBuf {
-    let home = std::env::var("HOME").expect("Failed to find $HOME");
-    PathBuf::from(home)
-}
-
-#[cfg(target_os = "windows")]
-pub fn home_dir() -> PathBuf {
-    let home = std::env::var("USERPROFILE").expect("Failed to find %userprofile%");
-    PatBuf::from(home)
-}
-
-// Get the application configuration directory for the user config
-pub fn config_dir() -> PathBuf {
-    let config_dir =
-        std::env::var("XDG_CONFIG_HOME").map_or_else(|_| home_dir().join(".config"), PathBuf::from);
-    config_dir.join("dirpin")
-}
-
-/// Get the application data directory for internal data
-pub fn data_dir() -> PathBuf {
-    let data_dir = std::env::var("XDG_DATA_HOME")
-        .map_or_else(|_| home_dir().join(".local").join("share"), PathBuf::from);
-    data_dir.join("dirpin")
 }

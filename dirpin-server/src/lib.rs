@@ -5,13 +5,13 @@ use std::net::SocketAddr;
 use tokio::net::TcpListener;
 use tokio::signal;
 
-mod database;
-mod handlers;
-mod router;
-mod models;
 mod authentication;
-pub mod settings;
+pub mod database;
 mod error;
+mod handlers;
+mod models;
+mod router;
+pub mod settings;
 
 use database::Database;
 
@@ -38,7 +38,7 @@ async fn shutdown_signal() {
     eprintln!("Shutting down gracefully...");
 }
 
-async fn make_router(_settings: &Settings, database: Database) -> Router {
+pub async fn make_router(_settings: &Settings, database: Database) -> Router {
     router::router(database)
 }
 
@@ -47,6 +47,7 @@ pub async fn launch(settings: &Settings, address: SocketAddr) -> Result<()> {
         .await
         .context("Failed to connect to tcp listener")?;
     let database = Database::new(&settings.db_path).await?;
+    database.migrate().await?;
     let r = make_router(&settings, database).await;
 
     tracing::info!("Server started at {}", address);

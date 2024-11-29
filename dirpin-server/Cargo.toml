@@ -6,7 +6,7 @@ edition.workspace = true
 
 [dependencies]
 dirpin-common = { path = "../dirpin-common" }
-axum = "0.7.7"
+axum = { workspace = true }
 eyre = { workspace = true } 
 tokio = { workspace = true }
 config = { workspace = true }

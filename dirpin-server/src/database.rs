@@ -72,7 +72,7 @@ impl<'r> FromRow<'r, SqliteRow> for DbSession {
 
 #[derive(Clone)]
 pub struct Database {
-    pool: SqlitePool,
+    pub pool: SqlitePool,
 }
 
 #[derive(Debug)]
@@ -100,7 +100,7 @@ fn db_error(error: sqlx::Error) -> DbError {
 }
 
 impl Database {
-    pub async fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
+    pub async fn new<P: AsRef<Path>>(path: &P) -> Result<Self> {
         let path = path.as_ref();
         debug!("opening database at {:?}", path);
         if !path.exists() {
@@ -113,14 +113,12 @@ impl Database {
             SqliteConnectOptions::from_str(path.to_str().unwrap())?.create_if_missing(true);
         let pool = SqlitePoolOptions::new().connect_with(options).await?;
 
-        Self::setup_db(&pool).await?;
-
         Ok(Self { pool })
     }
 
-    async fn setup_db(pool: &SqlitePool) -> Result<()> {
+    pub async fn migrate(&self) -> eyre::Result<()> {
         debug!("setting up database");
-        sqlx::migrate!("./migrations").run(pool).await?;
+        sqlx::migrate!("./migrations").run(&self.pool).await?;
 
         Ok(())
     }
