@@ -501,7 +501,7 @@ mod tests {
         Ok(database)
     }
 
-    async fn setup_upload_test() -> eyre::Result<(String, String, Database, Key)> {
+    async fn setup_upload_test() -> eyre::Result<(MockServer, String, Database, Key)> {
         let key = setup_key()?;
         let database = setup_db().await?;
         let mock_server = MockServer::start().await;
@@ -511,17 +511,15 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let _ = tokio::time::sleep(tokio::time::Duration::from_millis(200));
-
-        Ok((mock_server.uri(), "session".into(), database, key))
+        Ok((mock_server, "session".into(), database, key))
     }
 
     #[tokio::test]
     async fn sync_upload_empty_data() {
-        let (address, session, database, key) = setup_upload_test().await.unwrap();
+        let (server, session, database, key) = setup_upload_test().await.unwrap();
 
         let res = super::sync_upload(
-            &address,
+            &server.uri(),
             &database,
             &session,
             &key,
@@ -536,14 +534,14 @@ mod tests {
 
     #[tokio::test]
     async fn sync_upload_with_entry() {
-        let (address, session, database, key) = setup_upload_test().await.unwrap();
+        let (server, session, database, key) = setup_upload_test().await.unwrap();
         let host_id = HostId::custom(Word().fake(), Word().fake());
 
         let entry = Entry::new(Word().fake(), "/".into(), None, host_id);
         database.save(&entry).await.unwrap();
 
         let res = super::sync_upload(
-            &address,
+            &server.uri(),
             &database,
             &session,
             &key,
@@ -561,7 +559,7 @@ mod tests {
         use crate::domain::context::Context;
         use crate::domain::workspace::Workspace;
 
-        let (address, session, database, key) = setup_upload_test().await.unwrap();
+        let (server, session, database, key) = setup_upload_test().await.unwrap();
         let host_id = HostId::custom(Word().fake(), Word().fake());
 
         let workspace = Workspace::new("global".into(), &Context::global());
@@ -584,7 +582,7 @@ mod tests {
         database.save_bulk(&entries).await.unwrap();
 
         let res = super::sync_upload(
-            &address,
+            &server.uri(),
             &database,
             &session,
             &key,
