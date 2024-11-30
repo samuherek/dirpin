@@ -478,10 +478,14 @@ pub async fn sync(settings: &Settings, db: &Database, force: bool) -> Result<()>
 #[cfg(test)]
 mod tests {
     use crate::database::Database;
+    use crate::domain::context::Context;
     use crate::domain::entry::Entry;
     use crate::domain::host::HostId;
+    use crate::domain::workspace::Workspace;
     use crate::encryption;
+    use crate::encryption::encrypt;
     use crypto_secretbox::Key;
+    use dirpin_common::api::{RefDelete, RefItem};
     use fake::faker::lorem::en::Word;
     use fake::Fake;
     use time::OffsetDateTime;
@@ -596,80 +600,72 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sync_download() {
-        use crate::domain::context::Context;
-        use crate::domain::workspace::Workspace;
-
+    async fn sync_download_status() {
         let key = setup_key().unwrap();
         let database = setup_db().await.unwrap();
 
         let host_id = HostId::custom(Word().fake(), Word().fake());
-        let workspace = Workspace::new("global".into(), &Context::global());
-        use crate::encryption::encrypt;
-        use dirpin_common::api::RefItem;
+        let ws1 = Workspace::new("global".into(), &Context::global());
+        let e1 = Entry::new(
+            Word().fake(),
+            "/".into(),
+            Some(ws1.id.clone()),
+            host_id.clone(),
+        );
+        let e2 = Entry::new(
+            Word().fake(),
+            "/".into(),
+            Some(ws1.id.clone()),
+            host_id.clone(),
+        );
 
-        let updated = vec![
-            RefItem {
-                data: encrypt(&workspace, &key).unwrap().to_json_base64().unwrap(),
-                kind: "workspace".into(),
-            },
-            RefItem {
-                data: encrypt(
-                    &Entry::new(
-                        Word().fake(),
-                        "/".into(),
-                        Some(workspace.id.clone()),
-                        host_id.clone(),
-                    ),
-                    &key,
-                )
-                .unwrap()
-                .to_json_base64()
-                .unwrap(),
-                kind: "entry".into(),
-            },
-            RefItem {
-                data: encrypt(
-                    &Entry::new(
-                        Word().fake(),
-                        "/".into(),
-                        Some(workspace.id.clone()),
-                        host_id.clone(),
-                    ),
-                    &key,
-                )
-                .unwrap()
-                .to_json_base64()
-                .unwrap(),
-                kind: "entry".into(),
-            },
-        ];
+        let d_w = Workspace::new("global".into(), &Context::global());
+        let d_e = Entry::new(
+            Word().fake(),
+            "/".into(),
+            Some(ws1.id.clone()),
+            host_id.clone(),
+        );
 
         let mock_server = MockServer::start().await;
-        // pub struct SyncResponse {
-        //     /// These are all with deleted_at field None
-        //     pub updated: Vec<RefItem>,
-        //     /// These are all with delted_at field Some(_)
-        //     pub deleted: Vec<RefDelete>,
         Mock::given(method("GET"))
             .and(path("/sync"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "updated": updated,
-                "deleted": []
+            "updated": vec![
+                RefItem {
+                    data: encrypt(&ws1, &key).unwrap().to_json_base64().unwrap(),
+                    kind: "workspace".into(),
+                },
+                RefItem {
+                    data: encrypt(&e1, &key).unwrap().to_json_base64().unwrap(),
+                    kind: "entry".into(),
+                },
+                RefItem {
+                    data: encrypt(&e2, &key).unwrap().to_json_base64().unwrap(),
+                    kind: "entry".into(),
+                },
+            ],
+            "deleted": vec![
+                RefDelete {
+                    client_id: d_e.id.to_string(),
+                    version: d_e.version,
+                    updated_at: d_e.updated_at,
+                    deleted_at: d_e.updated_at,
+                    kind: "entry".into(),
+                },
+                RefDelete {
+                    client_id: d_w.id.to_string(),
+                    version: d_w.version,
+                    updated_at: d_w.updated_at,
+                    deleted_at: d_w.updated_at,
+                    kind: "workspace".into(),
+                },
+            ]
             })))
             .mount(&mock_server)
             .await;
         let address = mock_server.uri();
         let session = "session".to_string();
-
-        // buffer.push(AddEntryRequest {
-        //     id: workspace.id.to_string(),
-        //     data: encrypt(ws, key)?.to_json_base64()?,
-        //     kind: "workspace".into(),
-        //     version: workspace.version.inner(),
-        //     updated_at: workspace.updated_at,
-        //     deleted_at: workspace.deleted_at,
-        // });
 
         let res = super::sync_download(
             &address,
@@ -681,6 +677,92 @@ mod tests {
         .await
         .unwrap();
 
-        println!("res: {res:?}");
+        assert_eq!(res.entry_updates, 2);
+        assert_eq!(res.entry_delets, 1);
+        assert_eq!(res.workspace_updates, 1);
+        assert_eq!(res.workspace_delets, 1);
+    }
+
+    #[tokio::test]
+    async fn sync_download_saves_to_database() {
+        let key = setup_key().unwrap();
+        let database = setup_db().await.unwrap();
+        let mock_server = MockServer::start().await;
+        let session = "session".to_string();
+
+        let host_id = HostId::custom(Word().fake(), Word().fake());
+
+        let ws1 = Workspace::new("global".into(), &Context::global());
+        let e1 = Entry::new(
+            Word().fake(),
+            "/".into(),
+            Some(ws1.id.clone()),
+            host_id.clone(),
+        );
+
+        let d_e1 = Entry::new(Word().fake(), "/".into(), None, host_id.clone());
+
+        Mock::given(method("GET"))
+            .and(path("/sync"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "updated": vec![
+                    RefItem {
+                        data: encrypt(&ws1, &key).unwrap().to_json_base64().unwrap(),
+                        kind: "workspace".into(),
+                    },
+                    RefItem {
+                        data: encrypt(&e1,&key).unwrap().to_json_base64().unwrap(),
+                        kind: "entry".into(),
+                    },
+                ],
+                "deleted": vec![RefDelete {
+                    client_id: d_e1.id.to_string(),
+                    version: d_e1.version,
+                    updated_at: d_e1.updated_at,
+                    deleted_at: d_e1.updated_at,
+                    kind: "entry".into(),
+                }]
+            })))
+            .mount(&mock_server)
+            .await;
+        let address = mock_server.uri();
+
+        let res = super::sync_download(
+            &address,
+            &database,
+            &session,
+            &key,
+            OffsetDateTime::UNIX_EPOCH,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(res.entry_updates, 1);
+        assert_eq!(res.entry_delets, 1);
+        assert_eq!(res.workspace_updates, 1);
+        assert_eq!(res.workspace_delets, 0);
+
+        let db_ws = database.list_workspaces("").await.unwrap();
+        let db_e = database
+            .list(
+                crate::database::FilterMode::All,
+                &Context::global(),
+                None,
+                "",
+            )
+            .await
+            .unwrap();
+        let db_d_e = database
+            .deleted_after(OffsetDateTime::UNIX_EPOCH)
+            .await
+            .unwrap();
+
+        assert_eq!(db_ws.len(), 1);
+        assert_eq!(db_e.len(), 1);
+        assert_eq!(db_d_e.len(), 1);
+
+        assert_eq!(db_ws[0], ws1);
+        assert_eq!(db_e[0], e1);
+        assert_eq!(db_d_e[0].id, d_e1.id);
     }
 }

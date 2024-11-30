@@ -14,7 +14,7 @@ use time::format_description::well_known::Rfc3339;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 /// TODO: Add the ability to have custom types
 pub enum EntryKind {
     Note,
@@ -51,7 +51,7 @@ impl std::fmt::Display for EntryKind {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub struct Entry {
     pub id: Uuid,
     pub value: String,

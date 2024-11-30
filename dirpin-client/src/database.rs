@@ -218,6 +218,25 @@ impl Database {
         Ok(res)
     }
 
+    pub async fn list_workspaces(&self, search: &str) -> Result<Vec<Workspace>> {
+        debug!("Query workspaces from datbase");
+        let mut query = SqlBuilder::select_from("workspaces");
+        query.field("*");
+
+        if !search.is_empty() {
+            query.and_where_like_any("value", search);
+        }
+
+        let query = query.sql().expect("Failed to parse query");
+        let res = sqlx::query_as(&query)
+            .fetch(&self.pool)
+            .map_ok(|DbWorkspace(ws)| ws)
+            .try_collect()
+            .await?;
+
+        Ok(res)
+    }
+
     pub async fn after_workspaces(&self, updated_at: OffsetDateTime) -> Result<Vec<Workspace>> {
         debug!("Query workspaces before from datbase");
         let res = sqlx::query_as(
@@ -437,7 +456,7 @@ impl Database {
         .bind(v.deleted_at.unix_timestamp())
         .bind(v.version.inner())
         .bind(None::<String>)
-        .bind("")
+        .bind("x@x")
         .execute(&mut **tx)
         .await?;
 

@@ -12,7 +12,7 @@ use std::str::FromStr;
 /// with the same name and user, this issue would not arise anyway. And since this is a developer
 /// tool and not a corportaion tool, I think it's safe to assume that the id not being unique is
 /// highly unlikely at this point.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub struct HostId(String);
 
 impl HostId {

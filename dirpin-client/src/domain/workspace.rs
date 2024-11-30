@@ -31,7 +31,7 @@ impl FromStr for WorkspaceId {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub struct WorkspacePath {
     host_id: HostId,
     path: String,
@@ -66,7 +66,7 @@ impl std::fmt::Display for WorkspacePath {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Eq, PartialEq)]
 pub struct Workspace {
     pub id: WorkspaceId,
     pub name: String,
