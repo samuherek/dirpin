@@ -3,12 +3,13 @@ use crate::domain::workspace::Workspace;
 use std::str::FromStr;
 use uuid::Uuid;
 
-pub enum ConflictRef {
+#[derive(Debug)]
+pub enum ConflictKind {
     Entry,
     Workspace,
 }
 
-impl ConflictRef {
+impl ConflictKind {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Entry => "entry",
@@ -17,19 +18,19 @@ impl ConflictRef {
     }
 }
 
-impl FromStr for ConflictRef {
+impl FromStr for ConflictKind {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "entry" => Ok(Self::Entry),
-            "Workspace" => Ok(Self::Workspace),
+            "workspace" => Ok(Self::Workspace),
             _ => Err("Failed to parse ConflictRef from string".into()),
         }
     }
 }
 
-impl std::fmt::Display for ConflictRef {
+impl std::fmt::Display for ConflictKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.as_str())
     }
@@ -39,24 +40,31 @@ pub trait HasId {
     fn id(&self) -> &Uuid;
 }
 
-
-
-pub struct Conflict {
-    pub ref_id: Uuid,
-    pub ref_kind: ConflictRef,
-    /// TODO: probably not a good idea to have it as a string
-    pub data: String,
+#[derive(Debug)]
+pub enum Conflict {
+    Entry(Entry),
+    Workspace(Workspace),
 }
 
 impl Conflict {
-    pub fn from_serializable<T: serde::Serialize + HasId>(
-        value: &T,
-    ) -> Result<Self, serde_json::Error> {
-        let data = serde_json::to_string(value)?;
-        Ok(Self {
-            ref_id: value.id().clone(),
-            ref_kind: ConflictRef::Entry,
-            data,
-        })
+    pub fn id(&self) -> String {
+        match self {
+            Conflict::Entry(v) => v.id.to_string(),
+            Conflict::Workspace(v) => v.id.to_string(),
+        }
+    }
+
+    pub fn kind(&self) -> &str {
+        match self {
+            Conflict::Entry(_) => "entry",
+            Conflict::Workspace(_) => "workspace",
+        }
+    }
+
+    pub fn data(&self) -> eyre::Result<String> {
+        match self {
+            Conflict::Entry(v) => Ok(serde_json::to_string(&v)?),
+            Conflict::Workspace(v) => Ok(serde_json::to_string(&v)?),
+        }
     }
 }

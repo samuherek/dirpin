@@ -10,7 +10,6 @@ use dirpin_common::api::{AddEntryRequest, AddSyncRequest, RefDelete, RefItem};
 use dirpin_common::domain::SyncVersion;
 use eyre::{bail, Result};
 use std::collections::HashMap;
-use std::hash::Hash;
 use std::str::FromStr;
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -202,76 +201,33 @@ async fn get_local_delets(
     Ok((workspaces, entries))
 }
 
-fn collect_diff_updates<H, T>(
-    remote: &HashMap<H, T>,
-    local: &HashMap<H, T>,
-    changes: &mut Vec<T>,
-    conflicts: &mut Vec<Conflict>,
-) -> Result<()>
-where
-    H: Hash + Eq,
-    T: HasSyncProperties + Clone + HasId + serde::Serialize,
-{
-    for (id, r) in remote {
-        if let Some(l) = local.get(&id) {
-            let r_time = r.updated_at();
-            let l_time = l.updated_at();
-            let r_version = r.version();
-            let l_version = l.version();
-
-            // If updated_at and version is higher, it's all good
-            if r_time > l_time && r_version > l_version {
-                changes.push(r.clone());
-            // if timed_at and version is equal, it's old and good,
-            } else if r_time == l_time && r_version == l_version {
-                continue;
-            // if locals are higher, local will update later
-            } else if r_time < l_time && r_version < l_version {
-                continue;
-            // otherwise we have a conflict;
-            } else {
-                let conflict = Conflict::from_serializable(r)?;
-                conflicts.push(conflict);
-            }
-        } else {
-            changes.push(r.clone());
-        }
-    }
-
-    Ok(())
+enum LatestOrigin {
+    Remote,
+    Local,
+    Conflict,
 }
 
-fn collect_diff_delets<H, T>(
-    remote: &HashMap<H, RefDelete>,
-    local: &HashMap<H, T>,
-    changes: &mut Vec<RefDelete>,
-    conflicts: &mut Vec<Conflict>,
-) -> Result<()>
+fn compare_versions<T>(remote: &T, local: &T) -> LatestOrigin
 where
-    H: Hash + Eq,
-    T: HasSyncProperties<Timestamp = OffsetDateTime, Version = SyncVersion>
-        + Clone
-        + HasId
-        + serde::Serialize,
-    RefDelete: HasSyncProperties,
-    OffsetDateTime: PartialOrd<<T as HasSyncProperties>::Timestamp>,
+    T: HasSyncProperties,
 {
-    for (id, r) in remote {
-        if let Some(l) = local.get(&id) {
-            // If either version or updated_at are higher locally, it means there is some conflict.
-            if r.updated_at() < l.updated_at() || r.version() < l.version() {
-                let mut item = l.clone();
-                item.set_deleted_at(r.deleted_at.clone());
-                let conflict = Conflict::from_serializable(&item)?;
-                conflicts.push(conflict);
-                continue;
-            }
-        }
+    let r_time = remote.updated_at();
+    let l_time = local.updated_at();
+    let r_version = remote.version();
+    let l_version = local.version();
 
-        changes.push(r.clone());
+    // If updated_at and version is higher, it's all good
+    if r_time > l_time && r_version > l_version {
+        return LatestOrigin::Remote;
+        // if timed_at and version is equal, it's old and good,
+    } else if r_time == l_time && r_version == l_version {
+        return LatestOrigin::Local;
+        // if locals are higher, local will update later
+    } else if r_time < l_time && r_version < l_version {
+        return LatestOrigin::Local;
     }
-
-    Ok(())
+    // otherwise we have a conflict;
+    LatestOrigin::Conflict
 }
 
 #[derive(Debug)]
@@ -280,6 +236,7 @@ struct DownloadStatus {
     workspace_updates: usize,
     entry_delets: usize,
     entry_updates: usize,
+    conflicts: usize,
 }
 
 /// Get the list of the updates (full data)
@@ -308,37 +265,69 @@ async fn sync_download(
         );
     }
 
-    let mut update_workspaces: Vec<Workspace> = vec![];
-    let mut update_entries: Vec<Entry> = vec![];
-    let mut delete_workspaces: Vec<RefDelete> = vec![];
-    let mut delete_entries: Vec<RefDelete> = vec![];
     let mut conflicts: Vec<Conflict> = vec![];
 
-    collect_diff_updates(
-        &remote_workspace_ups,
-        &local_workspace_ups,
-        &mut update_workspaces,
-        &mut conflicts,
-    )?;
-    collect_diff_updates(
-        &remote_entry_ups,
-        &local_entry_ups,
-        &mut update_entries,
-        &mut conflicts,
-    )?;
+    let mut update_workspaces: Vec<Workspace> = vec![];
+    for (id, r) in remote_workspace_ups {
+        if let Some(l) = local_workspace_ups.get(&id) {
+            match compare_versions(&r, l) {
+                LatestOrigin::Remote => update_workspaces.push(r.clone()),
+                LatestOrigin::Local => continue,
+                LatestOrigin::Conflict => {
+                    let conflict = Conflict::Workspace(r);
+                    conflicts.push(conflict);
+                }
+            }
+        } else {
+            update_workspaces.push(r.clone());
+        }
+    }
 
-    collect_diff_delets(
-        &remote_workspace_dels,
-        &local_workspace_dels,
-        &mut delete_workspaces,
-        &mut conflicts,
-    )?;
-    collect_diff_delets(
-        &remote_entry_dels,
-        &local_entry_dels,
-        &mut delete_entries,
-        &mut conflicts,
-    )?;
+    let mut update_entries: Vec<Entry> = vec![];
+    for (id, r) in remote_entry_ups {
+        if let Some(l) = local_entry_ups.get(&id) {
+            match compare_versions(&r, l) {
+                LatestOrigin::Remote => update_entries.push(r.clone()),
+                LatestOrigin::Local => continue,
+                LatestOrigin::Conflict => {
+                    let conflict = Conflict::Entry(r);
+                    conflicts.push(conflict);
+                }
+            }
+        } else {
+            update_entries.push(r.clone());
+        }
+    }
+
+    let mut delete_workspaces: Vec<RefDelete> = vec![];
+    for (id, r) in remote_workspace_dels {
+        if let Some(l) = local_workspace_dels.get(&id) {
+            // If either version or updated_at are higher locally, it means there is some conflict.
+            if r.updated_at() < l.updated_at() || r.version() < l.version() {
+                let mut item = l.clone();
+                item.set_deleted_at(r.deleted_at.clone());
+                let conflict = Conflict::Workspace(item);
+                conflicts.push(conflict);
+                continue;
+            }
+        }
+        delete_workspaces.push(r.clone());
+    }
+
+    let mut delete_entries: Vec<RefDelete> = vec![];
+    for (id, r) in remote_entry_dels {
+        if let Some(l) = local_entry_dels.get(&id) {
+            // If either version or updated_at are higher locally, it means there is some conflict.
+            if r.updated_at() < l.updated_at() || r.version() < l.version() {
+                let mut item = l.clone();
+                item.set_deleted_at(r.deleted_at.clone());
+                let conflict = Conflict::Entry(item);
+                conflicts.push(conflict);
+                continue;
+            }
+        }
+        delete_entries.push(r.clone());
+    }
 
     // Update first. Workspaces must go first.
     db.save_workspace_bulk(&update_workspaces).await?;
@@ -351,11 +340,6 @@ async fn sync_download(
     // Check for conflicts
     if !conflicts.is_empty() {
         db.save_conflicts_bulk(&conflicts).await?;
-        println!(
-            "{} conflicts. Resolve in app before resyncing",
-            conflicts.len()
-        );
-        std::process::exit(0);
     }
 
     Ok(DownloadStatus {
@@ -363,6 +347,7 @@ async fn sync_download(
         workspace_delets: delete_workspaces.len(),
         entry_updates: update_entries.len(),
         entry_delets: delete_entries.len(),
+        conflicts: conflicts.len(),
     })
 }
 
@@ -460,6 +445,14 @@ pub async fn sync(settings: &Settings, db: &Database, force: bool) -> Result<()>
     };
 
     let down_status = sync_download(server_address, db, &session, &key, from.clone()).await?;
+    if down_status.conflicts > 0 {
+        println!(
+            "{} conflicts. Resolve in app before resyncing",
+            down_status.conflicts
+        );
+        return Ok(());
+    }
+
     let up_status = sync_upload(server_address, db, &session, &key, from).await?;
 
     println!(
@@ -478,6 +471,7 @@ pub async fn sync(settings: &Settings, db: &Database, force: bool) -> Result<()>
 #[cfg(test)]
 mod tests {
     use crate::database::Database;
+    use crate::domain::conflict::Conflict;
     use crate::domain::context::Context;
     use crate::domain::entry::Entry;
     use crate::domain::host::HostId;
@@ -681,6 +675,7 @@ mod tests {
         assert_eq!(res.entry_delets, 1);
         assert_eq!(res.workspace_updates, 1);
         assert_eq!(res.workspace_delets, 1);
+        assert_eq!(res.conflicts, 0);
     }
 
     #[tokio::test]
@@ -741,6 +736,7 @@ mod tests {
         assert_eq!(res.entry_delets, 1);
         assert_eq!(res.workspace_updates, 1);
         assert_eq!(res.workspace_delets, 0);
+        assert_eq!(res.conflicts, 0);
 
         let db_ws = database.list_workspaces("").await.unwrap();
         let db_e = database
@@ -764,5 +760,58 @@ mod tests {
         assert_eq!(db_ws[0], ws1);
         assert_eq!(db_e[0], e1);
         assert_eq!(db_d_e[0].id, d_e1.id);
+    }
+
+    #[tokio::test]
+    async fn sync_download_saves_conflict_to_database() {
+        let key = setup_key().unwrap();
+        let database = setup_db().await.unwrap();
+        let mock_server = MockServer::start().await;
+        let session = "session".to_string();
+
+        let host_id = HostId::custom(Word().fake(), Word().fake());
+
+        let mut e1 = Entry::new(Word().fake(), "/".into(), None, host_id.clone());
+        database.save(&e1).await.unwrap();
+
+        e1.version.bump();
+
+        Mock::given(method("GET"))
+            .and(path("/sync"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "updated": vec![
+                    RefItem {
+                        data: encrypt(&e1, &key).unwrap().to_json_base64().unwrap(),
+                        kind: "entry".into(),
+                    },
+                ],
+                "deleted": []
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let address = mock_server.uri();
+
+        let res = super::sync_download(
+            &address,
+            &database,
+            &session,
+            &key,
+            OffsetDateTime::UNIX_EPOCH,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(res.entry_updates, 0);
+        assert_eq!(res.entry_delets, 0);
+        assert_eq!(res.workspace_updates, 0);
+        assert_eq!(res.workspace_delets, 0);
+        assert_eq!(res.conflicts, 1);
+
+        let conflicts = database.list_conflicts().await.unwrap();
+
+        assert_eq!(conflicts.len(), 1);
+        assert!(matches!(conflicts[0], Conflict::Entry(_)));
+        assert_eq!(conflicts[0].id(), e1.id.to_string());
     }
 }

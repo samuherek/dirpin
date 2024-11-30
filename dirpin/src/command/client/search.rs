@@ -12,7 +12,7 @@ pub struct Cmd {}
 
 impl Cmd {
     pub(crate) async fn run(self, settings: &Settings, database: &Database) -> Result<()> {
-        let context = Context::cwd(settings);
+        let context = Context::cwd();
         interactive::run(settings, database, &context).await?;
 
         Ok(())

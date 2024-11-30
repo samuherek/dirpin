@@ -13,7 +13,7 @@ pub struct Cmd {
 
 impl Cmd {
     pub(crate) async fn run(self, settings: &Settings, db: &Database) -> Result<()> {
-        let context = Context::cwd(settings);
+        let context = Context::cwd();
         let workspace = db.workspace(None, None, &context).await?;
         let entries = db
             .list(FilterMode::Workspace, &context, workspace.as_ref(), "")

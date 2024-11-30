@@ -21,6 +21,7 @@ use uuid::Uuid;
 
 pub struct DbEntry(pub Entry);
 pub struct DbWorkspace(pub Workspace);
+pub struct DbConflict(pub Conflict);
 
 impl<'r> FromRow<'r, SqliteRow> for DbEntry {
     fn from_row(row: &'r SqliteRow) -> sqlx::Result<Self> {
@@ -71,6 +72,24 @@ impl<'r> FromRow<'r, SqliteRow> for DbWorkspace {
                 .map(|x: Option<i64>| x.map(|y| OffsetDateTime::from_unix_timestamp(y).unwrap()))?,
             version: row.try_get("version").map(|x: u32| SyncVersion::from(x))?,
         }))
+    }
+}
+
+impl<'r> FromRow<'r, SqliteRow> for DbConflict {
+    fn from_row(row: &'r SqliteRow) -> sqlx::Result<Self> {
+        let kind: &str = row.try_get("ref_kind")?;
+        let data: &str = row.try_get("data")?;
+        match kind {
+            "entry" => {
+                let value = serde_json::from_str::<Entry>(data).unwrap();
+                Ok(Self(Conflict::Entry(value)))
+            }
+            "workspace" => {
+                let value = serde_json::from_str::<Workspace>(data).unwrap();
+                Ok(Self(Conflict::Workspace(value)))
+            }
+            _ => panic!("Found invalid conflict kind"),
+        }
     }
 }
 
@@ -399,12 +418,12 @@ impl Database {
             on conflict(ref_id) do update set
                 ref_id = ?1,
                 ref_kind = ?2,
-                data = ?3,
+                data = ?3
             "#,
         )
-        .bind(v.ref_id.to_string())
-        .bind(v.ref_kind.to_string())
-        .bind(v.data.to_owned())
+        .bind(v.id())
+        .bind(v.kind())
+        .bind(v.data()?)
         .execute(&mut **tx)
         .await?;
 
@@ -420,6 +439,17 @@ impl Database {
         tx.commit().await?;
 
         Ok(())
+    }
+
+    pub async fn list_conflicts(&self) -> Result<Vec<Conflict>> {
+        debug!("Query conflicts datbase");
+        let res = sqlx::query_as("select * from conflicts")
+            .fetch(&self.pool)
+            .map_ok(|DbConflict(c)| c)
+            .try_collect()
+            .await?;
+
+        Ok(res)
     }
 
     pub async fn delete_tx(
